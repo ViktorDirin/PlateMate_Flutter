@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/theme.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -15,6 +16,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isGoogleLoading = false;
 
   @override
   void initState() {
@@ -83,6 +85,58 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       if (mounted) {
         setState(() {
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() {
+      _isGoogleLoading = true;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        serverClientId: '151506389849-g02fsf8p8j7h6kf00t5ltlq5fkssrmc2.apps.googleusercontent.com',
+      );
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        setState(() {
+          _isGoogleLoading = false;
+        });
+        return;
+      }
+      final googleAuth = await googleUser.authentication;
+      if (googleAuth.idToken != null) {
+        await Supabase.instance.client.auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: googleAuth.idToken!,
+          accessToken: googleAuth.accessToken,
+        );
+      } else {
+        throw Exception('Google Sign-In failed: idToken is null.');
+      }
+    } on AuthException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Google Sign-In Error: $e');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Google Sign-In error: $e'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGoogleLoading = false;
         });
       }
     }
@@ -231,6 +285,70 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                const Row(
+                  children: [
+                    Expanded(child: Divider(color: Color(0xFF334155))),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'OR',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Divider(color: Color(0xFF334155))),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _isGoogleLoading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: AppTheme.accent),
+                      )
+                    : OutlinedButton(
+                        onPressed: _handleGoogleSignIn,
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E293B),
+                          foregroundColor: AppTheme.textPrimary,
+                          side: const BorderSide(color: Color(0xFF334155)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.network(
+                              'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/120px-Google_%22G%22_logo.svg.png',
+                              height: 20,
+                              width: 20,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Text(
+                                  'G',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Continue with Google',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
               ],
             ),
           ),

@@ -93,6 +93,20 @@ class RemoveSnackFromSlot extends DietEvent {
   RemoveSnackFromSlot({required this.date, required this.slotId, required this.index});
 }
 
+class ToggleMealCompletion extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final bool isCompleted;
+  ToggleMealCompletion({required this.date, required this.slotId, required this.isCompleted});
+}
+
+class UpdateMealCompletionTime extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final DateTime completedAt;
+  UpdateMealCompletionTime({required this.date, required this.slotId, required this.completedAt});
+}
+
 class SyncDataFromSupabase extends DietEvent {}
 
 // --- State ---
@@ -225,6 +239,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
 
     // Sync
     on<SyncDataFromSupabase>(_onSyncDataFromSupabase);
+    on<ToggleMealCompletion>(_onToggleMealCompletion);
+    on<UpdateMealCompletionTime>(_onUpdateMealCompletionTime);
   }
 
   bool _isSameDate(DateTime a, DateTime b) {
@@ -502,19 +518,40 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
     if (index >= 0) {
       final existing = plans[index];
       final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
+      final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+      final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+
       if (event.mealId == null) {
         slotMeals.remove(event.slotId);
+        slotCompleted.remove(event.slotId);
+        slotCompletedAt.remove(event.slotId);
       } else {
         slotMeals[event.slotId] = [event.mealId!];
+        slotCompleted[event.slotId] = false;
+        slotCompletedAt[event.slotId] = null;
       }
-      updatedPlan = existing.copyWith(slotMeals: slotMeals);
+      updatedPlan = existing.copyWith(
+        slotMeals: slotMeals,
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+      );
       plans[index] = updatedPlan;
     } else {
       final Map<String, List<String>> slotMeals = {};
+      final Map<String, bool> slotCompleted = {};
+      final Map<String, DateTime?> slotCompletedAt = {};
+
       if (event.mealId != null) {
         slotMeals[event.slotId] = [event.mealId!];
+        slotCompleted[event.slotId] = false;
+        slotCompletedAt[event.slotId] = null;
       }
-      updatedPlan = DayPlan(date: event.date, slotMeals: slotMeals);
+      updatedPlan = DayPlan(
+        date: event.date,
+        slotMeals: slotMeals,
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+      );
       plans.add(updatedPlan);
     }
 
@@ -538,6 +575,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
           'slot_id': event.slotId,
           'meal_ids': [event.mealId!],
           'cleared_ingredients': updatedPlan.clearedIngredients,
+          'is_completed': false,
+          'completed_at': null,
         }).then((_) {}, onError: (e) => debugPrint('Supabase plan upsert error: $e'));
       }
     }
@@ -553,13 +592,29 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
       final currentList = List<String>.from(slotMeals[event.slotId] ?? [])..add(event.mealId);
       slotMeals[event.slotId] = currentList;
-      updatedPlan = existing.copyWith(slotMeals: slotMeals);
+
+      final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+      final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+      slotCompleted[event.slotId] = false;
+      slotCompletedAt[event.slotId] = null;
+
+      updatedPlan = existing.copyWith(
+        slotMeals: slotMeals,
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+      );
       plans[index] = updatedPlan;
     } else {
       updatedPlan = DayPlan(
         date: event.date,
         slotMeals: {
           event.slotId: [event.mealId],
+        },
+        slotCompleted: {
+          event.slotId: false,
+        },
+        slotCompletedAt: {
+          event.slotId: null,
         },
       );
       plans.add(updatedPlan);
@@ -578,6 +633,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
         'slot_id': event.slotId,
         'meal_ids': updatedPlan.slotMeals[event.slotId],
         'cleared_ingredients': updatedPlan.clearedIngredients,
+        'is_completed': false,
+        'completed_at': null,
       }).then((_) {}, onError: (e) => debugPrint('Supabase snack add upsert error: $e'));
     }
   }
@@ -594,12 +651,27 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
         if (event.index >= 0 && event.index < currentList.length) {
           currentList.removeAt(event.index);
           DayPlan updatedPlan;
+          final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+          final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+
           if (currentList.isEmpty) {
             slotMeals.remove(event.slotId);
-            updatedPlan = existing.copyWith(slotMeals: slotMeals);
+            slotCompleted.remove(event.slotId);
+            slotCompletedAt.remove(event.slotId);
+            updatedPlan = existing.copyWith(
+              slotMeals: slotMeals,
+              slotCompleted: slotCompleted,
+              slotCompletedAt: slotCompletedAt,
+            );
           } else {
             slotMeals[event.slotId] = currentList;
-            updatedPlan = existing.copyWith(slotMeals: slotMeals);
+            slotCompleted[event.slotId] = false;
+            slotCompletedAt[event.slotId] = null;
+            updatedPlan = existing.copyWith(
+              slotMeals: slotMeals,
+              slotCompleted: slotCompleted,
+              slotCompletedAt: slotCompletedAt,
+            );
           }
           plans[index] = updatedPlan;
           emit(state.copyWith(dayPlans: plans));
@@ -622,6 +694,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
                 'slot_id': event.slotId,
                 'meal_ids': currentList,
                 'cleared_ingredients': updatedPlan.clearedIngredients,
+                'is_completed': false,
+                'completed_at': null,
               }).then((_) {}, onError: (e) => debugPrint('Supabase snack remove upsert error: $e'));
             }
           }
@@ -633,6 +707,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
   static List<DayPlan> _parseDayPlansFromSupabase(List<dynamic> rows) {
     final Map<String, Map<String, List<String>>> groupedMeals = {};
     final Map<String, List<String>> clearedIngredients = {};
+    final Map<String, Map<String, bool>> slotCompleted = {};
+    final Map<String, Map<String, DateTime?>> slotCompletedAt = {};
     final Map<String, DateTime> dates = {};
 
     for (final row in rows) {
@@ -641,6 +717,9 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       final slotId = row['slot_id'] as String;
       final List<String> mealIds = List<String>.from(row['meal_ids'] as List<dynamic>? ?? []);
       final List<String> cleared = List<String>.from(row['cleared_ingredients'] as List<dynamic>? ?? []);
+      final bool isCompleted = row['is_completed'] as bool? ?? false;
+      final String? completedAtStr = row['completed_at'] as String?;
+      final DateTime? completedAt = completedAtStr != null ? DateTime.parse(completedAtStr) : null;
 
       dates[dateStr] = date;
       
@@ -657,6 +736,16 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
           clearedIngredients[dateStr]!.add(ing);
         }
       }
+
+      if (!slotCompleted.containsKey(dateStr)) {
+        slotCompleted[dateStr] = {};
+      }
+      slotCompleted[dateStr]![slotId] = isCompleted;
+
+      if (!slotCompletedAt.containsKey(dateStr)) {
+        slotCompletedAt[dateStr] = {};
+      }
+      slotCompletedAt[dateStr]![slotId] = completedAt;
     }
 
     return groupedMeals.entries.map((entry) {
@@ -666,6 +755,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
         date: dates[dateStr]!,
         slotMeals: slotMeals,
         clearedIngredients: clearedIngredients[dateStr] ?? [],
+        slotCompleted: slotCompleted[dateStr] ?? {},
+        slotCompletedAt: slotCompletedAt[dateStr] ?? {},
       );
     }).toList();
   }
@@ -782,6 +873,119 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       ));
     } catch (e) {
       debugPrint('Error syncing from Supabase: $e');
+    }
+  }
+
+  void _onToggleMealCompletion(ToggleMealCompletion event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+    DayPlan updatedPlan;
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+      final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+
+      if (event.isCompleted) {
+        slotCompleted[event.slotId] = true;
+        slotCompletedAt[event.slotId] = DateTime.now();
+      } else {
+        slotCompleted[event.slotId] = false;
+        slotCompletedAt[event.slotId] = null;
+      }
+
+      updatedPlan = existing.copyWith(
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+      );
+      plans[index] = updatedPlan;
+    } else {
+      updatedPlan = DayPlan(
+        date: event.date,
+        slotMeals: const {},
+        slotCompleted: {event.slotId: event.isCompleted},
+        slotCompletedAt: {event.slotId: event.isCompleted ? DateTime.now() : null},
+      );
+      plans.add(updatedPlan);
+    }
+
+    emit(state.copyWith(dayPlans: plans));
+
+    // Supabase background sync
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final dateStr = event.date.toIso8601String().substring(0, 10);
+        final completedAtStr = event.isCompleted ? DateTime.now().toIso8601String() : null;
+        final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
+
+        client.from('day_plans').upsert({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+          'meal_ids': mealIds,
+          'cleared_ingredients': updatedPlan.clearedIngredients,
+          'is_completed': event.isCompleted,
+          'completed_at': completedAtStr,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase toggle completion error: $e'));
+      }
+    } catch (e) {
+      debugPrint('Supabase client access error (potentially in tests): $e');
+    }
+  }
+
+  void _onUpdateMealCompletionTime(UpdateMealCompletionTime event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+    DayPlan updatedPlan;
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+      final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+
+      slotCompleted[event.slotId] = true;
+      slotCompletedAt[event.slotId] = event.completedAt;
+
+      updatedPlan = existing.copyWith(
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+      );
+      plans[index] = updatedPlan;
+    } else {
+      updatedPlan = DayPlan(
+        date: event.date,
+        slotMeals: const {},
+        slotCompleted: {event.slotId: true},
+        slotCompletedAt: {event.slotId: event.completedAt},
+      );
+      plans.add(updatedPlan);
+    }
+
+    emit(state.copyWith(dayPlans: plans));
+
+    // Supabase background sync
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final dateStr = event.date.toIso8601String().substring(0, 10);
+        final completedAtStr = event.completedAt.toIso8601String();
+        final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
+
+        client.from('day_plans').upsert({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+          'meal_ids': mealIds,
+          'cleared_ingredients': updatedPlan.clearedIngredients,
+          'is_completed': true,
+          'completed_at': completedAtStr,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase update completion time error: $e'));
+      }
+    } catch (e) {
+      debugPrint('Supabase client access error (potentially in tests): $e');
     }
   }
 

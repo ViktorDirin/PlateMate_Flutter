@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -182,6 +183,23 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   DateTime _selectedDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   bool _isSameDate(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
@@ -239,6 +257,137 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildEatenTimeBadge(String slotId, DateTime completedAt) {
+    return GestureDetector(
+      onTap: () async {
+        final time = await showTimePicker(
+          context: context,
+          initialTime: TimeOfDay.fromDateTime(completedAt),
+          builder: (context, child) {
+            return Theme(
+              data: Theme.of(context).copyWith(
+                colorScheme: const ColorScheme.dark(
+                  primary: AppTheme.accent,
+                  onPrimary: AppTheme.background,
+                  surface: AppTheme.cardBg,
+                  onSurface: AppTheme.textPrimary,
+                ),
+              ),
+              child: child!,
+            );
+          },
+        );
+        if (time != null && mounted) {
+          final updated = DateTime(
+            _selectedDate.year,
+            _selectedDate.month,
+            _selectedDate.day,
+            time.hour,
+            time.minute,
+          );
+          context.read<DietBloc>().add(
+            UpdateMealCompletionTime(
+              date: _selectedDate,
+              slotId: slotId,
+              completedAt: updated,
+            ),
+          );
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.accent.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.access_time, size: 12, color: AppTheme.accent),
+            const SizedBox(width: 4),
+            Text(
+              'Eaten: ${_formatTimeOfDay(completedAt)}',
+              style: const TextStyle(
+                color: AppTheme.accent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTimeOfDay(DateTime dateTime) {
+    final hour = dateTime.hour;
+    final minute = dateTime.minute;
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    final formattedHour = hour % 12 == 0 ? 12 : hour % 12;
+    final formattedMinute = minute.toString().padLeft(2, '0');
+    return '$formattedHour:$formattedMinute $ampm';
+  }
+
+  Widget _buildLastMealBanner(DietState state) {
+    final now = DateTime.now();
+    DateTime? latestEatenToday;
+
+    for (final plan in state.dayPlans) {
+      if (plan.date.year == now.year && plan.date.month == now.month && plan.date.day == now.day) {
+        plan.slotCompletedAt.forEach((slotId, completedAt) {
+          final isCompleted = plan.slotCompleted[slotId] ?? false;
+          if (isCompleted && completedAt != null) {
+            if (latestEatenToday == null || completedAt.isAfter(latestEatenToday!)) {
+              latestEatenToday = completedAt;
+            }
+          }
+        });
+      }
+    }
+
+    String bannerText;
+    if (latestEatenToday != null) {
+      final diff = now.difference(latestEatenToday!);
+      if (diff.isNegative) {
+        bannerText = '⏱️ Last meal: 0h 0m ago';
+      } else {
+        final hours = diff.inHours;
+        final minutes = diff.inMinutes % 60;
+        bannerText = '⏱️ Last meal: ${hours}h ${minutes}m ago';
+      }
+    } else {
+      bannerText = '⏱️ No meals eaten today yet';
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.accent.withValues(alpha: 0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              bannerText,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -341,7 +490,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSelectedSlot(String slotId, String slotName, Meal meal) {
+  Widget _buildSelectedSlot(String slotId, String slotName, Meal meal, DayPlan dayPlan) {
+    final isCompleted = dayPlan.slotCompleted[slotId] ?? false;
+    final completedAt = dayPlan.slotCompletedAt[slotId];
+
     return Card(
       color: AppTheme.cardBg,
       margin: EdgeInsets.zero,
@@ -360,22 +512,30 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Category tag
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accent.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
-                  ),
-                  child: Text(
-                    slotName,
-                    style: const TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                // Category tag & Eaten badge
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
+                      ),
+                      child: Text(
+                        slotName,
+                        style: const TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (isCompleted && completedAt != null) ...[
+                      const SizedBox(width: 8),
+                      _buildEatenTimeBadge(slotId, completedAt),
+                    ],
+                  ],
                 ),
                 // Change / Edit action
                 TextButton.icon(
@@ -393,14 +553,36 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Meal Name
-            Text(
-              meal.name,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-              ),
+            // Meal Checkbox & Name
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Checkbox(
+                  value: isCompleted,
+                  activeColor: AppTheme.accent,
+                  onChanged: (val) {
+                    context.read<DietBloc>().add(
+                      ToggleMealCompletion(
+                        date: _selectedDate,
+                        slotId: slotId,
+                        isCompleted: val ?? false,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    meal.name,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                      decoration: isCompleted ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             // Ingredient chips wrap
@@ -476,6 +658,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    final isCompleted = dayPlan.slotCompleted[slotId] ?? false;
+    final completedAt = dayPlan.slotCompletedAt[slotId];
+
     return Card(
       color: AppTheme.cardBg,
       margin: EdgeInsets.zero,
@@ -491,14 +676,35 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  slotName,
-                  style: const TextStyle(
-                    color: AppTheme.accentMuted,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: isCompleted,
+                      activeColor: AppTheme.accent,
+                      onChanged: (val) {
+                        context.read<DietBloc>().add(
+                          ToggleMealCompletion(
+                            date: _selectedDate,
+                            slotId: slotId,
+                            isCompleted: val ?? false,
+                          ),
+                        );
+                      },
+                    ),
+                    Text(
+                      slotName,
+                      style: const TextStyle(
+                        color: AppTheme.accentMuted,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    if (isCompleted && completedAt != null) ...[
+                      const SizedBox(width: 8),
+                      _buildEatenTimeBadge(slotId, completedAt),
+                    ],
+                  ],
                 ),
                 TextButton.icon(
                   onPressed: () => _pickSnackForSlot(context, _selectedDate, slotId, slotName),
@@ -543,9 +749,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Text(
                               snackMeal.name,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.textPrimary,
+                                decoration: isCompleted ? TextDecoration.lineThrough : null,
                               ),
                             ),
                             if (snackMeal.ingredients.isNotEmpty) ...[
@@ -588,7 +795,13 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         // 1. Scrolling Week selector
         _buildWeekDaySelector(),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+
+        // Last Meal Banner
+        BlocBuilder<DietBloc, DietState>(
+          builder: (context, state) => _buildLastMealBanner(state),
+        ),
+        const SizedBox(height: 8),
 
         // Divider
         const Padding(
@@ -687,7 +900,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     return meal == null
                         ? _buildEmptySlot(slotConfig.id, slotConfig.name)
-                        : _buildSelectedSlot(slotConfig.id, slotConfig.name, meal);
+                        : _buildSelectedSlot(slotConfig.id, slotConfig.name, meal, dayPlan);
                   }
                 },
               );

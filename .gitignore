@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Private credentials and keys
+/docs/*.txt
+/docs/API keys my app.txt
