@@ -1,186 +1,198 @@
-import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/diet_plan.dart';
+import 'package:uuid/uuid.dart';
+import '../models/meal.dart';
+import '../models/day_plan.dart';
+import '../models/meal_slot_config.dart';
 
 // --- Events ---
 abstract class DietEvent {}
 
-class LoadDiets extends DietEvent {}
-
-class SetDefaultDiet extends DietEvent {
-  final String id;
-  SetDefaultDiet(this.id);
-}
-
-class AddDiet extends DietEvent {
-  final String name;
-  AddDiet(this.name);
-}
-
-class UpdateDiet extends DietEvent {
-  final DietPlan diet;
-  UpdateDiet(this.diet);
-}
-
-class DeleteDiet extends DietEvent {
-  final String id;
-  DeleteDiet(this.id);
-}
-
-class SyncWithCloud extends DietEvent {}
-
-// --- Library Events ---
-class AddLibraryMeal extends DietEvent {
+class AddMealToLibrary extends DietEvent {
   final Meal meal;
-  AddLibraryMeal(this.meal);
+  AddMealToLibrary(this.meal);
 }
 
-class UpdateLibraryMeal extends DietEvent {
-  final Meal meal;
-  UpdateLibraryMeal(this.meal);
+class DeleteMealFromLibrary extends DietEvent {
+  final String mealId;
+  DeleteMealFromLibrary(this.mealId);
 }
 
-class DeleteLibraryMeal extends DietEvent {
-  final String id;
-  DeleteLibraryMeal(this.id);
-}
-
-class ReorderLibraryMeals extends DietEvent {
+class ScheduleMeal extends DietEvent {
+  final DateTime date;
   final String category;
+  final String? mealId;
+  ScheduleMeal({required this.date, required this.category, this.mealId});
+}
+
+class AddSnackToDay extends DietEvent {
+  final DateTime date;
+  final String mealId;
+  AddSnackToDay({required this.date, required this.mealId});
+}
+
+class RemoveSnackFromDay extends DietEvent {
+  final DateTime date;
+  final int index;
+  RemoveSnackFromDay({required this.date, required this.index});
+}
+
+class ToggleGroceryItem extends DietEvent {
+  final String item;
+  ToggleGroceryItem(this.item);
+}
+
+class AddManualGroceryItem extends DietEvent {
+  final String item;
+  AddManualGroceryItem(this.item);
+}
+
+class ClearCheckedGrocery extends DietEvent {}
+
+// Custom slot configuration events
+class AddMealSlot extends DietEvent {
+  final MealSlotConfig slot;
+  AddMealSlot(this.slot);
+}
+
+class UpdateMealSlot extends DietEvent {
+  final MealSlotConfig slot;
+  UpdateMealSlot(this.slot);
+}
+
+class DeleteMealSlot extends DietEvent {
+  final String slotId;
+  DeleteMealSlot(this.slotId);
+}
+
+class ReorderMealSlots extends DietEvent {
   final int oldIndex;
   final int newIndex;
-  ReorderLibraryMeals(this.category, this.oldIndex, this.newIndex);
+  ReorderMealSlots({required this.oldIndex, required this.newIndex});
 }
+
+class ScheduleMealToSlot extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final String? mealId;
+  ScheduleMealToSlot({required this.date, required this.slotId, this.mealId});
+}
+
+class AddSnackToSlot extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final String mealId;
+  AddSnackToSlot({required this.date, required this.slotId, required this.mealId});
+}
+
+class RemoveSnackFromSlot extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final int index;
+  RemoveSnackFromSlot({required this.date, required this.slotId, required this.index});
+}
+
+class SyncDataFromSupabase extends DietEvent {}
 
 // --- State ---
 class DietState {
-  final List<DietPlan> diets;
-  final String? defaultDietId;
-  final bool isSyncing;
-  final bool syncFailed;
-  final List<Meal> libraryMeals;
+  final List<Meal> mealsLibrary;
+  final List<DayPlan> dayPlans;
+  final List<String> crossedIngredients;
+  final List<String> manualGroceryItems;
+  final List<MealSlotConfig> mealSlots;
 
   DietState({
-    required this.diets,
-    this.defaultDietId,
-    this.isSyncing = false,
-    this.syncFailed = false,
-    required this.libraryMeals,
+    required this.mealsLibrary,
+    required this.dayPlans,
+    this.crossedIngredients = const [],
+    this.manualGroceryItems = const [],
+    required this.mealSlots,
   });
 
   DietState copyWith({
-    List<DietPlan>? diets,
-    String? defaultDietId,
-    bool? isSyncing,
-    bool? syncFailed,
-    List<Meal>? libraryMeals,
+    List<Meal>? mealsLibrary,
+    List<DayPlan>? dayPlans,
+    List<String>? crossedIngredients,
+    List<String>? manualGroceryItems,
+    List<MealSlotConfig>? mealSlots,
   }) {
     return DietState(
-      diets: diets ?? this.diets,
-      defaultDietId: defaultDietId ?? this.defaultDietId,
-      isSyncing: isSyncing ?? this.isSyncing,
-      syncFailed: syncFailed ?? this.syncFailed,
-      libraryMeals: libraryMeals ?? this.libraryMeals,
+      mealsLibrary: mealsLibrary ?? this.mealsLibrary,
+      dayPlans: dayPlans ?? this.dayPlans,
+      crossedIngredients: crossedIngredients ?? this.crossedIngredients,
+      manualGroceryItems: manualGroceryItems ?? this.manualGroceryItems,
+      mealSlots: mealSlots ?? this.mealSlots,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'diets': diets.map((d) => d.toJson()).toList(),
-      'defaultDietId': defaultDietId,
-      'libraryMeals': libraryMeals.map((m) => m.toJson()).toList(),
+      'mealsLibrary': mealsLibrary.map((m) => m.toMap()).toList(),
+      'dayPlans': dayPlans.map((d) => d.toMap()).toList(),
+      'crossedIngredients': crossedIngredients,
+      'manualGroceryItems': manualGroceryItems,
+      'mealSlots': mealSlots.map((s) => s.toMap()).toList(),
     };
   }
 
   factory DietState.fromJson(Map<String, dynamic> json) {
-    final parsedLibrary = (json['libraryMeals'] as List<dynamic>?)
-        ?.map((m) => Meal.fromJson(m as Map<String, dynamic>))
+    final parsedLibrary = (json['mealsLibrary'] as List<dynamic>?)
+        ?.map((m) => Meal.fromMap(m as Map<String, dynamic>))
         .toList();
-    
+    final parsedPlans = (json['dayPlans'] as List<dynamic>?)
+        ?.map((d) => DayPlan.fromMap(d as Map<String, dynamic>))
+        .toList();
+    final parsedCrossed = (json['crossedIngredients'] as List<dynamic>?)
+        ?.map((e) => e as String)
+        .toList();
+    final parsedManual = (json['manualGroceryItems'] as List<dynamic>?)
+        ?.map((e) => e as String)
+        .toList();
+    final parsedSlots = (json['mealSlots'] as List<dynamic>?)
+        ?.map((s) => MealSlotConfig.fromMap(s as Map<String, dynamic>))
+        .toList();
+
     return DietState(
-      diets: (json['diets'] as List<dynamic>?)
-              ?.map((d) => DietPlan.fromJson(d as Map<String, dynamic>))
-              .toList() ??
-          [],
-      defaultDietId: json['defaultDietId'] as String?,
-      libraryMeals: parsedLibrary ?? _defaultLibraryMeals(),
+      mealsLibrary: parsedLibrary ?? _defaultMeals(),
+      dayPlans: parsedPlans ?? [],
+      crossedIngredients: parsedCrossed ?? [],
+      manualGroceryItems: parsedManual ?? [],
+      mealSlots: parsedSlots ?? _defaultSlots(),
     );
   }
 
-  static List<Meal> _defaultLibraryMeals() {
+  static List<MealSlotConfig> _defaultSlots() {
+    return [
+      MealSlotConfig(id: '00000000-0000-0000-0000-000000000001', name: 'Breakfast', orderIndex: 0, isEnabled: true),
+      MealSlotConfig(id: '00000000-0000-0000-0000-000000000002', name: 'Lunch', orderIndex: 1, isEnabled: true),
+      MealSlotConfig(id: '00000000-0000-0000-0000-000000000003', name: 'Dinner', orderIndex: 2, isEnabled: true),
+      MealSlotConfig(id: '00000000-0000-0000-0000-000000000004', name: 'Snacks', orderIndex: 3, isEnabled: true),
+    ];
+  }
+
+  static List<Meal> _defaultMeals() {
     return [
       Meal(
-        name: 'Овсяная каша с бананом',
+        name: 'Oatmeal with Berries',
         category: 'Breakfast',
-        time: '08:30',
-        date: '',
-        sortOrder: 0,
-        ingredients: [
-          Ingredient(name: 'Овсяные хлопья', quantity: 50, unit: 'gr'),
-          Ingredient(name: 'Банан', quantity: 1, unit: 'pcs'),
-          Ingredient(name: 'Молоко', quantity: 150, unit: 'ml'),
-        ],
+        ingredients: ['Oats', 'Almond Milk', 'Blueberries', 'Honey'],
       ),
       Meal(
-        name: 'Омлет с томатами',
-        category: 'Breakfast',
-        time: '09:00',
-        date: '',
-        sortOrder: 1,
-        ingredients: [
-          Ingredient(name: 'Яйца', quantity: 3, unit: 'pcs'),
-          Ingredient(name: 'Томаты', quantity: 1, unit: 'pcs'),
-          Ingredient(name: 'Масло оливковое', quantity: 5, unit: 'ml'),
-        ],
-      ),
-      Meal(
-        name: 'Куриная грудка с рисом',
+        name: 'Grilled Chicken Salad',
         category: 'Lunch',
-        time: '13:00',
-        date: '',
-        sortOrder: 0,
-        ingredients: [
-          Ingredient(name: 'Куриное филе', quantity: 150, unit: 'gr'),
-          Ingredient(name: 'Рис отварной', quantity: 120, unit: 'gr'),
-          Ingredient(name: 'Брокколи', quantity: 70, unit: 'gr'),
-        ],
+        ingredients: ['Chicken Breast', 'Mixed Greens', 'Cherry Tomatoes', 'Olive Oil'],
       ),
       Meal(
-        name: 'Паста с тунцом',
-        category: 'Lunch',
-        time: '14:00',
-        date: '',
-        sortOrder: 1,
-        ingredients: [
-          Ingredient(name: 'Паста', quantity: 80, unit: 'gr'),
-          Ingredient(name: 'Тунец консервированный', quantity: 100, unit: 'gr'),
-          Ingredient(name: 'Черри', quantity: 50, unit: 'gr'),
-        ],
-      ),
-      Meal(
-        name: 'Лосось на гриле с аспарагусом',
+        name: 'Salmon with Steamed Rice',
         category: 'Dinner',
-        time: '19:00',
-        date: '',
-        sortOrder: 0,
-        ingredients: [
-          Ingredient(name: 'Лосось филе', quantity: 160, unit: 'gr'),
-          Ingredient(name: 'Спарка (аспарагус)', quantity: 100, unit: 'gr'),
-          Ingredient(name: 'Лимонный сок', quantity: 10, unit: 'ml'),
-        ],
+        ingredients: ['Salmon Fillet', 'White Rice', 'Broccoli', 'Soy Sauce'],
       ),
       Meal(
-        name: 'Салат легкий с сыром сиртаки',
-        category: 'Dinner',
-        time: '19:30',
-        date: '',
-        sortOrder: 1,
-        ingredients: [
-          Ingredient(name: 'Огурец', quantity: 100, unit: 'gr'),
-          Ingredient(name: 'Помидор', quantity: 100, unit: 'gr'),
-          Ingredient(name: 'Сыр Сиртаки', quantity: 50, unit: 'gr'),
-        ],
+        name: 'Greek Yogurt & Walnuts',
+        category: 'Snack',
+        ingredients: ['Greek Yogurt', 'Walnuts', 'Honey'],
       ),
     ];
   }
@@ -188,210 +200,589 @@ class DietState {
 
 // --- Bloc ---
 class DietBloc extends HydratedBloc<DietEvent, DietState> {
-  DietBloc() : super(DietState(diets: [], libraryMeals: DietState._defaultLibraryMeals())) {
-    on<LoadDiets>(_onLoadDiets);
-    on<SetDefaultDiet>(_onSetDefaultDiet);
-    on<AddDiet>(_onAddDiet);
-    on<UpdateDiet>(_onUpdateDiet);
-    on<DeleteDiet>(_onDeleteDiet);
-    on<SyncWithCloud>(_onSyncWithCloud);
+  DietBloc() : super(DietState(
+      mealsLibrary: DietState._defaultMeals(),
+      dayPlans: [],
+      mealSlots: DietState._defaultSlots(),
+  )) {
+    on<AddMealToLibrary>(_onAddMealToLibrary);
+    on<DeleteMealFromLibrary>(_onDeleteMealFromLibrary);
+    on<ScheduleMeal>(_onScheduleMeal);
+    on<AddSnackToDay>(_onAddSnackToDay);
+    on<RemoveSnackFromDay>(_onRemoveSnackFromDay);
+    on<ToggleGroceryItem>(_onToggleGroceryItem);
+    on<AddManualGroceryItem>(_onAddManualGroceryItem);
+    on<ClearCheckedGrocery>(_onClearCheckedGrocery);
 
-    // Library handlers
-    on<AddLibraryMeal>(_onAddLibraryMeal);
-    on<UpdateLibraryMeal>(_onUpdateLibraryMeal);
-    on<DeleteLibraryMeal>(_onDeleteLibraryMeal);
-    on<ReorderLibraryMeals>(_onReorderLibraryMeals);
+    // Custom Slots
+    on<AddMealSlot>(_onAddMealSlot);
+    on<UpdateMealSlot>(_onUpdateMealSlot);
+    on<DeleteMealSlot>(_onDeleteMealSlot);
+    on<ReorderMealSlots>(_onReorderMealSlots);
+    on<ScheduleMealToSlot>(_onScheduleMealToSlot);
+    on<AddSnackToSlot>(_onAddSnackToSlot);
+    on<RemoveSnackFromSlot>(_onRemoveSnackFromSlot);
+
+    // Sync
+    on<SyncDataFromSupabase>(_onSyncDataFromSupabase);
   }
 
-  SupabaseClient? get _supabaseClient {
-    try {
-      return Supabase.instance.client;
-    } catch (_) {
-      return null;
+  bool _isSameDate(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  void _onAddMealToLibrary(AddMealToLibrary event, Emitter<DietState> emit) {
+    final updated = List<Meal>.from(state.mealsLibrary)..add(event.meal);
+    emit(state.copyWith(mealsLibrary: updated));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      client.from('meals').insert({
+        'id': event.meal.id,
+        'name': event.meal.name,
+        'category': event.meal.category,
+        'ingredients': event.meal.ingredients,
+        'user_id': userId,
+      }).then((_) {}, onError: (e) => debugPrint('Supabase meals insert error: $e'));
     }
   }
 
-  Future<void> _onLoadDiets(LoadDiets event, Emitter<DietState> emit) async {
-    emit(state.copyWith(isSyncing: true, syncFailed: false));
-    await _performSync(emit);
-  }
+  void _onDeleteMealFromLibrary(DeleteMealFromLibrary event, Emitter<DietState> emit) {
+    final updatedLibrary = state.mealsLibrary.where((m) => m.id != event.mealId).toList();
 
-  Future<void> _onSyncWithCloud(SyncWithCloud event, Emitter<DietState> emit) async {
-    emit(state.copyWith(isSyncing: true, syncFailed: false));
-    await _performSync(emit);
-  }
+    final updatedPlans = state.dayPlans.map((plan) {
+      final slotMeals = Map<String, List<String>>.from(plan.slotMeals);
+      final keysToUpdate = <String>[];
+      
+      slotMeals.forEach((slotId, list) {
+        if (list.contains(event.mealId)) {
+          keysToUpdate.add(slotId);
+        }
+      });
 
-  Future<void> _onSetDefaultDiet(SetDefaultDiet event, Emitter<DietState> emit) async {
-    final updatedDiets = state.diets.map((diet) {
-      return diet.copyWith(isDefault: diet.id == event.id);
+      for (var key in keysToUpdate) {
+        final updatedList = slotMeals[key]!.where((id) => id != event.mealId).toList();
+        if (updatedList.isEmpty) {
+          slotMeals.remove(key);
+        } else {
+          slotMeals[key] = updatedList;
+        }
+      }
+
+      return plan.copyWith(slotMeals: slotMeals);
     }).toList();
-    emit(state.copyWith(diets: updatedDiets, defaultDietId: event.id));
-    _triggerBackgroundUpsert(updatedDiets);
-  }
-
-  Future<void> _onAddDiet(AddDiet event, Emitter<DietState> emit) async {
-    final newDiet = DietPlan(
-      name: event.name,
-      isDefault: state.diets.isEmpty,
-      meals: [],
-    );
-    
-    final updatedDiets = List<DietPlan>.from(state.diets)..add(newDiet);
-    final defaultId = newDiet.isDefault ? newDiet.id : state.defaultDietId;
-    
-    emit(state.copyWith(diets: updatedDiets, defaultDietId: defaultId));
-    _triggerBackgroundUpsert(updatedDiets);
-  }
-
-  Future<void> _onUpdateDiet(UpdateDiet event, Emitter<DietState> emit) async {
-    final updatedDiet = event.diet.copyWith(updatedAt: DateTime.now());
-    final updatedDiets = state.diets.map((d) => d.id == updatedDiet.id ? updatedDiet : d).toList();
-    
-    emit(state.copyWith(diets: updatedDiets));
-    _triggerBackgroundSingleUpsert(updatedDiet);
-  }
-
-  Future<void> _onDeleteDiet(DeleteDiet event, Emitter<DietState> emit) async {
-    final updatedDiets = state.diets.where((d) => d.id != event.id).toList();
-    final defaultId = state.defaultDietId == event.id 
-        ? (updatedDiets.isNotEmpty ? updatedDiets.first.id : null)
-        : state.defaultDietId;
 
     emit(state.copyWith(
-      diets: updatedDiets, 
-      defaultDietId: defaultId,
+      mealsLibrary: updatedLibrary,
+      dayPlans: updatedPlans,
     ));
 
-    final client = _supabaseClient;
-    if (client != null) {
-      client.from('diet_plans').delete().eq('id', event.id).then((_) {}).catchError((_) {});
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      client.from('meals').delete().eq('id', event.mealId).then((_) {}, onError: (e) => debugPrint('Supabase meals delete error: $e'));
     }
   }
 
-  // --- Library Handlers ---
-  void _onAddLibraryMeal(AddLibraryMeal event, Emitter<DietState> emit) {
-    final updated = List<Meal>.from(state.libraryMeals)..add(event.meal);
-    emit(state.copyWith(libraryMeals: updated));
+  // Legacy ScheduleMeal event fallback
+  void _onScheduleMeal(ScheduleMeal event, Emitter<DietState> emit) {
+    final category = event.category.toLowerCase();
+    String slotId;
+    if (category == 'breakfast') {
+      slotId = '00000000-0000-0000-0000-000000000001';
+    } else if (category == 'lunch') {
+      slotId = '00000000-0000-0000-0000-000000000002';
+    } else if (category == 'dinner') {
+      slotId = '00000000-0000-0000-0000-000000000003';
+    } else {
+      slotId = '00000000-0000-0000-0000-000000000004';
+    }
+    add(ScheduleMealToSlot(date: event.date, slotId: slotId, mealId: event.mealId));
   }
 
-  void _onUpdateLibraryMeal(UpdateLibraryMeal event, Emitter<DietState> emit) {
-    final updated = state.libraryMeals.map((m) => m.id == event.meal.id ? event.meal : m).toList();
-    emit(state.copyWith(libraryMeals: updated));
+  // Legacy AddSnackToDay event fallback
+  void _onAddSnackToDay(AddSnackToDay event, Emitter<DietState> emit) {
+    add(AddSnackToSlot(date: event.date, slotId: '00000000-0000-0000-0000-000000000004', mealId: event.mealId));
   }
 
-  void _onDeleteLibraryMeal(DeleteLibraryMeal event, Emitter<DietState> emit) {
-    final updated = state.libraryMeals.where((m) => m.id != event.id).toList();
-    emit(state.copyWith(libraryMeals: updated));
+  // Legacy RemoveSnackFromDay event fallback
+  void _onRemoveSnackFromDay(RemoveSnackFromDay event, Emitter<DietState> emit) {
+    add(RemoveSnackFromSlot(date: event.date, slotId: '00000000-0000-0000-0000-000000000004', index: event.index));
   }
 
-  void _onReorderLibraryMeals(ReorderLibraryMeals event, Emitter<DietState> emit) {
-    // Filter out meals of specific category
-    final categoryMeals = state.libraryMeals.where((m) => m.category == event.category).toList();
-    categoryMeals.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  void _onToggleGroceryItem(ToggleGroceryItem event, Emitter<DietState> emit) {
+    final itemLower = event.item.toLowerCase().trim();
+    final updated = List<String>.from(state.crossedIngredients);
+    if (updated.contains(itemLower)) {
+      updated.remove(itemLower);
+    } else {
+      updated.add(itemLower);
+    }
+    emit(state.copyWith(crossedIngredients: updated));
+  }
 
+  void _onAddManualGroceryItem(AddManualGroceryItem event, Emitter<DietState> emit) {
+    final trimmed = event.item.trim();
+    if (trimmed.isEmpty) return;
+    
+    final updated = List<String>.from(state.manualGroceryItems);
+    if (!updated.any((e) => e.toLowerCase() == trimmed.toLowerCase())) {
+      updated.add(trimmed);
+    }
+    emit(state.copyWith(manualGroceryItems: updated));
+  }
+
+  void _onClearCheckedGrocery(ClearCheckedGrocery event, Emitter<DietState> emit) {
+    final updatedPlans = state.dayPlans.map((plan) {
+      final List<String> newCleared = List<String>.from(plan.clearedIngredients);
+      
+      plan.slotMeals.forEach((slotId, mealIds) {
+        for (var mealId in mealIds) {
+          final meal = state.mealsLibrary.firstWhere(
+            (m) => m.id == mealId,
+            orElse: () => Meal(name: '', category: '', ingredients: []),
+          );
+          for (var ing in meal.ingredients) {
+            final ingLower = ing.toLowerCase().trim();
+            if (state.crossedIngredients.contains(ingLower)) {
+              if (!newCleared.contains(ingLower)) {
+                newCleared.add(ingLower);
+              }
+            }
+          }
+        }
+      });
+
+      return plan.copyWith(clearedIngredients: newCleared);
+    }).toList();
+
+    final crossedManual = state.manualGroceryItems.where((item) {
+      return state.crossedIngredients.contains(item.toLowerCase().trim());
+    }).toList();
+
+    final remainingManual = state.manualGroceryItems.where((item) {
+      return !crossedManual.contains(item);
+    }).toList();
+
+    emit(state.copyWith(
+      dayPlans: updatedPlans,
+      manualGroceryItems: remainingManual,
+      crossedIngredients: const [],
+    ));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      for (var plan in updatedPlans) {
+        final dateStr = plan.date.toIso8601String().substring(0, 10);
+        plan.slotMeals.forEach((slotId, mealIds) {
+          client.from('day_plans').upsert({
+            'user_id': userId,
+            'date': dateStr,
+            'slot_id': slotId,
+            'meal_ids': mealIds,
+            'cleared_ingredients': plan.clearedIngredients,
+          }).then((_) {}, onError: (e) => debugPrint('Supabase clear check-upsert error: $e'));
+        });
+      }
+    }
+  }
+
+  // Custom Slots management event handlers
+  void _onAddMealSlot(AddMealSlot event, Emitter<DietState> emit) {
+    final updated = List<MealSlotConfig>.from(state.mealSlots)..add(event.slot);
+    emit(state.copyWith(mealSlots: updated));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      client.from('slot_configs').insert({
+        'id': event.slot.id,
+        'name': event.slot.name,
+        'order_index': event.slot.orderIndex,
+        'is_enabled': event.slot.isEnabled,
+        'user_id': userId,
+      }).then((_) {}, onError: (e) => debugPrint('Supabase slots insert error: $e'));
+    }
+  }
+
+  void _onUpdateMealSlot(UpdateMealSlot event, Emitter<DietState> emit) {
+    final updated = state.mealSlots.map((s) => s.id == event.slot.id ? event.slot : s).toList();
+    emit(state.copyWith(mealSlots: updated));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      client.from('slot_configs').update({
+        'name': event.slot.name,
+        'order_index': event.slot.orderIndex,
+        'is_enabled': event.slot.isEnabled,
+      }).match({
+        'id': event.slot.id,
+        'user_id': userId,
+      }).then((_) {}, onError: (e) => debugPrint('Supabase slots update error: $e'));
+    }
+  }
+
+  void _onDeleteMealSlot(DeleteMealSlot event, Emitter<DietState> emit) {
+    final updatedSlots = state.mealSlots.where((s) => s.id != event.slotId).toList();
+
+    final updatedPlans = state.dayPlans.map((plan) {
+      final slotMeals = Map<String, List<String>>.from(plan.slotMeals);
+      slotMeals.remove(event.slotId);
+      return plan.copyWith(slotMeals: slotMeals);
+    }).toList();
+
+    emit(state.copyWith(
+      mealSlots: updatedSlots,
+      dayPlans: updatedPlans,
+    ));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      client.from('slot_configs').delete().match({
+        'id': event.slotId,
+        'user_id': userId,
+      }).then((_) {}, onError: (e) => debugPrint('Supabase slots delete error: $e'));
+
+      for (var plan in updatedPlans) {
+        final dateStr = plan.date.toIso8601String().substring(0, 10);
+        client.from('day_plans').delete().match({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase slots plan delete error: $e'));
+      }
+    }
+  }
+
+  void _onReorderMealSlots(ReorderMealSlots event, Emitter<DietState> emit) {
+    final updated = List<MealSlotConfig>.from(state.mealSlots);
     int newIndex = event.newIndex;
     if (event.oldIndex < newIndex) {
       newIndex -= 1;
     }
+    final item = updated.removeAt(event.oldIndex);
+    updated.insert(newIndex, item);
 
-    final item = categoryMeals.removeAt(event.oldIndex);
-    categoryMeals.insert(newIndex, item);
-
-    // Reassign sort orders
-    for (int i = 0; i < categoryMeals.length; i++) {
-      categoryMeals[i] = categoryMeals[i].copyWith(sortOrder: i);
+    for (int i = 0; i < updated.length; i++) {
+      updated[i] = updated[i].copyWith(orderIndex: i);
     }
 
-    // Merge back into total library meals
-    final remainingMeals = state.libraryMeals.where((m) => m.category != event.category).toList();
-    final finalMeals = [...remainingMeals, ...categoryMeals];
+    emit(state.copyWith(mealSlots: updated));
 
-    emit(state.copyWith(libraryMeals: finalMeals));
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      for (var slot in updated) {
+        client.from('slot_configs').update({
+          'order_index': slot.orderIndex,
+        }).match({
+          'id': slot.id,
+          'user_id': userId,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase slots reorder error: $e'));
+      }
+    }
   }
 
-  // Helper: Merges remote and local state
-  Future<void> _performSync(Emitter<DietState> emit) async {
-    final client = _supabaseClient;
-    if (client == null) {
-      emit(state.copyWith(isSyncing: false, syncFailed: true));
-      return;
+  void _onScheduleMealToSlot(ScheduleMealToSlot event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+    DayPlan updatedPlan;
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
+      if (event.mealId == null) {
+        slotMeals.remove(event.slotId);
+      } else {
+        slotMeals[event.slotId] = [event.mealId!];
+      }
+      updatedPlan = existing.copyWith(slotMeals: slotMeals);
+      plans[index] = updatedPlan;
+    } else {
+      final Map<String, List<String>> slotMeals = {};
+      if (event.mealId != null) {
+        slotMeals[event.slotId] = [event.mealId!];
+      }
+      updatedPlan = DayPlan(date: event.date, slotMeals: slotMeals);
+      plans.add(updatedPlan);
     }
 
-    try {
-      final response = await client.from('diet_plans').select();
-      final remoteDiets = (response as List<dynamic>)
-          .map((json) => DietPlan.fromJson(json as Map<String, dynamic>))
-          .toList();
+    emit(state.copyWith(dayPlans: plans));
 
-      final mergedDiets = <String, DietPlan>{};
-      for (var d in state.diets) {
-        mergedDiets[d.id] = d;
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      final dateStr = event.date.toIso8601String().substring(0, 10);
+      if (event.mealId == null) {
+        client.from('day_plans').delete().match({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase plan delete error: $e'));
+      } else {
+        client.from('day_plans').upsert({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+          'meal_ids': [event.mealId!],
+          'cleared_ingredients': updatedPlan.clearedIngredients,
+        }).then((_) {}, onError: (e) => debugPrint('Supabase plan upsert error: $e'));
       }
+    }
+  }
 
-      List<DietPlan> toUpload = [];
-      for (var remote in remoteDiets) {
-        final local = mergedDiets[remote.id];
-        if (local == null) {
-          mergedDiets[remote.id] = remote;
-        } else {
-          if (remote.updatedAt.isAfter(local.updatedAt)) {
-            mergedDiets[remote.id] = remote;
-          } else if (local.updatedAt.isAfter(remote.updatedAt)) {
-            toUpload.add(local);
+  void _onAddSnackToSlot(AddSnackToSlot event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+    DayPlan updatedPlan;
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
+      final currentList = List<String>.from(slotMeals[event.slotId] ?? [])..add(event.mealId);
+      slotMeals[event.slotId] = currentList;
+      updatedPlan = existing.copyWith(slotMeals: slotMeals);
+      plans[index] = updatedPlan;
+    } else {
+      updatedPlan = DayPlan(
+        date: event.date,
+        slotMeals: {
+          event.slotId: [event.mealId],
+        },
+      );
+      plans.add(updatedPlan);
+    }
+
+    emit(state.copyWith(dayPlans: plans));
+
+    // Supabase background sync
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId != null) {
+      final dateStr = event.date.toIso8601String().substring(0, 10);
+      client.from('day_plans').upsert({
+        'user_id': userId,
+        'date': dateStr,
+        'slot_id': event.slotId,
+        'meal_ids': updatedPlan.slotMeals[event.slotId],
+        'cleared_ingredients': updatedPlan.clearedIngredients,
+      }).then((_) {}, onError: (e) => debugPrint('Supabase snack add upsert error: $e'));
+    }
+  }
+
+  void _onRemoveSnackFromSlot(RemoveSnackFromSlot event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
+      if (slotMeals.containsKey(event.slotId)) {
+        final currentList = List<String>.from(slotMeals[event.slotId]!);
+        if (event.index >= 0 && event.index < currentList.length) {
+          currentList.removeAt(event.index);
+          DayPlan updatedPlan;
+          if (currentList.isEmpty) {
+            slotMeals.remove(event.slotId);
+            updatedPlan = existing.copyWith(slotMeals: slotMeals);
+          } else {
+            slotMeals[event.slotId] = currentList;
+            updatedPlan = existing.copyWith(slotMeals: slotMeals);
+          }
+          plans[index] = updatedPlan;
+          emit(state.copyWith(dayPlans: plans));
+
+          // Supabase background sync
+          final client = Supabase.instance.client;
+          final userId = client.auth.currentUser?.id;
+          if (userId != null) {
+            final dateStr = event.date.toIso8601String().substring(0, 10);
+            if (currentList.isEmpty) {
+              client.from('day_plans').delete().match({
+                'user_id': userId,
+                'date': dateStr,
+                'slot_id': event.slotId,
+              }).then((_) {}, onError: (e) => debugPrint('Supabase snack delete error: $e'));
+            } else {
+              client.from('day_plans').upsert({
+                'user_id': userId,
+                'date': dateStr,
+                'slot_id': event.slotId,
+                'meal_ids': currentList,
+                'cleared_ingredients': updatedPlan.clearedIngredients,
+              }).then((_) {}, onError: (e) => debugPrint('Supabase snack remove upsert error: $e'));
+            }
           }
         }
       }
-
-      for (var local in state.diets) {
-        if (!remoteDiets.any((r) => r.id == local.id)) {
-          toUpload.add(local);
-        }
-      }
-
-      final finalDiets = mergedDiets.values.toList();
-      String? defaultId = state.defaultDietId;
-      if (defaultId == null || !finalDiets.any((d) => d.id == defaultId)) {
-        final defPlan = finalDiets.firstWhere((d) => d.isDefault, orElse: () => finalDiets.isNotEmpty ? finalDiets.first : DietPlan(name: '', meals: []));
-        if (defPlan.name.isNotEmpty) {
-          defaultId = defPlan.id;
-        }
-      }
-
-      emit(state.copyWith(
-        diets: finalDiets,
-        defaultDietId: defaultId,
-        isSyncing: toUpload.isNotEmpty,
-        syncFailed: false,
-      ));
-
-      if (toUpload.isNotEmpty) {
-        for (var diet in toUpload) {
-          await client.from('diet_plans').upsert(diet.toJson());
-        }
-      }
-
-      emit(state.copyWith(isSyncing: false, syncFailed: false));
-    } catch (e) {
-      emit(state.copyWith(isSyncing: false, syncFailed: true));
     }
   }
 
-  void _triggerBackgroundUpsert(List<DietPlan> diets) async {
-    final client = _supabaseClient;
-    if (client == null) return;
-    try {
-      for (var diet in diets) {
-        await client.from('diet_plans').upsert(diet.toJson());
+  static List<DayPlan> _parseDayPlansFromSupabase(List<dynamic> rows) {
+    final Map<String, Map<String, List<String>>> groupedMeals = {};
+    final Map<String, List<String>> clearedIngredients = {};
+    final Map<String, DateTime> dates = {};
+
+    for (final row in rows) {
+      final dateStr = row['date'] as String;
+      final date = DateTime.parse(dateStr);
+      final slotId = row['slot_id'] as String;
+      final List<String> mealIds = List<String>.from(row['meal_ids'] as List<dynamic>? ?? []);
+      final List<String> cleared = List<String>.from(row['cleared_ingredients'] as List<dynamic>? ?? []);
+
+      dates[dateStr] = date;
+      
+      if (!groupedMeals.containsKey(dateStr)) {
+        groupedMeals[dateStr] = {};
       }
-    } catch (_) {}
+      groupedMeals[dateStr]![slotId] = mealIds;
+
+      if (!clearedIngredients.containsKey(dateStr)) {
+        clearedIngredients[dateStr] = [];
+      }
+      for (var ing in cleared) {
+        if (!clearedIngredients[dateStr]!.contains(ing)) {
+          clearedIngredients[dateStr]!.add(ing);
+        }
+      }
+    }
+
+    return groupedMeals.entries.map((entry) {
+      final dateStr = entry.key;
+      final slotMeals = entry.value;
+      return DayPlan(
+        date: dates[dateStr]!,
+        slotMeals: slotMeals,
+        clearedIngredients: clearedIngredients[dateStr] ?? [],
+      );
+    }).toList();
   }
 
-  void _triggerBackgroundSingleUpsert(DietPlan diet) async {
-    final client = _supabaseClient;
-    if (client == null) return;
+  Future<void> _onSyncDataFromSupabase(SyncDataFromSupabase event, Emitter<DietState> emit) async {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return;
+
     try {
-      await client.from('diet_plans').upsert(diet.toJson());
-    } catch (_) {}
+      // 1. Fetch meals
+      List<Meal> meals = [];
+      try {
+        final mealsResponse = await client.from('meals').select().eq('user_id', userId);
+        meals = (mealsResponse as List<dynamic>)
+            .map((m) => Meal.fromMap(m as Map<String, dynamic>))
+            .toList();
+      } catch (mealsErr) {
+        debugPrint('Error fetching meals from Supabase: $mealsErr');
+      }
+
+      if (meals.isEmpty) {
+        try {
+          final List<Map<String, dynamic>> starterMeals = [
+            {
+              'name': 'Oatmeal with Berries',
+              'category': 'Breakfast',
+              'ingredients': ['Oats', 'Almond Milk', 'Blueberries', 'Honey'],
+              'user_id': userId,
+            },
+            {
+              'name': 'Grilled Chicken Salad',
+              'category': 'Lunch',
+              'ingredients': ['Chicken Breast', 'Mixed Greens', 'Cherry Tomatoes', 'Olive Oil'],
+              'user_id': userId,
+            },
+            {
+              'name': 'Salmon with Steamed Rice',
+              'category': 'Dinner',
+              'ingredients': ['Salmon Fillet', 'White Rice', 'Broccoli', 'Soy Sauce'],
+              'user_id': userId,
+            },
+            {
+              'name': 'Greek Yogurt & Walnuts',
+              'category': 'Snack',
+              'ingredients': ['Greek Yogurt', 'Walnuts', 'Honey'],
+              'user_id': userId,
+            },
+          ];
+          await client.from('meals').insert(starterMeals);
+          final refetchedResponse = await client.from('meals').select().eq('user_id', userId);
+          meals = (refetchedResponse as List<dynamic>)
+              .map((m) => Meal.fromMap(m as Map<String, dynamic>))
+              .toList();
+        } catch (seedErr) {
+          debugPrint('Error seeding starter meals to Supabase: $seedErr');
+        }
+      }
+
+      // 2. Fetch slot configs
+      List<MealSlotConfig> slots = [];
+      try {
+        final slotsResponse = await client.from('slot_configs').select().eq('user_id', userId);
+        slots = (slotsResponse as List<dynamic>)
+            .map((s) => MealSlotConfig(
+                  id: s['id'] as String,
+                  name: s['name'] as String? ?? '',
+                  orderIndex: s['order_index'] as int? ?? 0,
+                  isEnabled: s['is_enabled'] as bool? ?? true,
+                ))
+            .toList()
+          ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+      } catch (slotsErr) {
+        debugPrint('Error fetching slots from Supabase: $slotsErr');
+      }
+
+      if (slots.isEmpty) {
+        try {
+          final List<Map<String, dynamic>> defaultSlots = [
+            {'id': const Uuid().v4(), 'name': 'Breakfast', 'order_index': 0, 'is_enabled': true, 'user_id': userId},
+            {'id': const Uuid().v4(), 'name': 'Lunch', 'order_index': 1, 'is_enabled': true, 'user_id': userId},
+            {'id': const Uuid().v4(), 'name': 'Dinner', 'order_index': 2, 'is_enabled': true, 'user_id': userId},
+            {'id': const Uuid().v4(), 'name': 'Snacks', 'order_index': 3, 'is_enabled': true, 'user_id': userId},
+          ];
+          await client.from('slot_configs').insert(defaultSlots);
+          
+          final refetchedSlotsResponse = await client.from('slot_configs').select().eq('user_id', userId);
+          slots = (refetchedSlotsResponse as List<dynamic>)
+              .map((s) => MealSlotConfig(
+                    id: s['id'] as String,
+                    name: s['name'] as String? ?? '',
+                    orderIndex: s['order_index'] as int? ?? 0,
+                    isEnabled: s['is_enabled'] as bool? ?? true,
+                  ))
+              .toList()
+            ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+        } catch (slotsSeedErr) {
+          debugPrint('Error seeding slots to Supabase: $slotsSeedErr');
+        }
+      }
+
+      if (slots.isEmpty) {
+        slots = DietState._defaultSlots();
+      }
+
+      // 3. Fetch day plans
+      final plansResponse = await client.from('day_plans').select();
+      final plans = _parseDayPlansFromSupabase(plansResponse as List<dynamic>);
+
+      emit(state.copyWith(
+        mealsLibrary: meals,
+        mealSlots: slots,
+        dayPlans: plans,
+      ));
+    } catch (e) {
+      debugPrint('Error syncing from Supabase: $e');
+    }
   }
 
   // --- HydratedBloc Implementation ---
