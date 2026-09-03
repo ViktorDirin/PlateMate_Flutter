@@ -34,16 +34,15 @@ class _MealsLibraryScreenState extends State<MealsLibraryScreen> {
   }
 
   void _showAddMealModal(BuildContext context) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: AppTheme.cardBg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      barrierDismissible: true,
       builder: (context) {
-        return _AddMealModalSheet(filterCategory: widget.filterCategory);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          child: _AddMealModalSheet(filterCategory: widget.filterCategory),
+        );
       },
     );
   }
@@ -378,194 +377,215 @@ class _AddMealModalSheetState extends State<_AddMealModalSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogWidth = screenWidth > 460 ? 420.0 : (screenWidth * 0.92);
+
+    return Container(
+      width: dialogWidth,
+      constraints: BoxConstraints(
+        maxWidth: 420,
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Add New Dish',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textPrimary,
-                      ),
-                ),
-                const SizedBox(height: 20),
+      padding: const EdgeInsets.all(20.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF334155),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Add New Dish',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+                onPressed: () => Navigator.pop(context),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
 
-                // Dish Name Input
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Dish Name',
-                    hintText: 'e.g., Spaghetti Carbonara',
-                  ),
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter the dish name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Category Selector Label
-                const Text(
-                  'Category',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Category ChoiceChips Wrap
-                Wrap(
-                  spacing: 8,
-                  children: _categories.map((cat) {
-                    final isSelected = _formCategory == cat;
-                    final displayLabel = cat == 'Snack' ? 'Snack' : cat;
-                    return ChoiceChip(
-                      label: Text(displayLabel),
-                      selected: isSelected,
-                      selectedColor: AppTheme.accent.withValues(alpha: 0.15),
-                      checkmarkColor: AppTheme.accent,
-                      labelStyle: TextStyle(
-                        color: isSelected ? AppTheme.accent : AppTheme.textSecondary,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      ),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() {
-                            _formCategory = cat;
-                          });
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 16),
-
-                 Row(
+          Flexible(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _tagInputController,
-                        focusNode: _tagFocusNode,
-                        decoration: const InputDecoration(
-                          labelText: 'Add Ingredients',
-                          hintText: 'Type and press comma/enter',
-                        ),
-                        style: const TextStyle(color: AppTheme.textPrimary),
-                        onChanged: (value) {
-                          if (value.contains(',')) {
-                            final parts = value.split(',');
-                            for (var part in parts) {
-                              final trimmed = part.trim();
-                              if (trimmed.isNotEmpty && !_tempIngredients.contains(trimmed)) {
-                                setState(() {
-                                  _tempIngredients.add(trimmed);
-                                });
-                              }
-                            }
-                            _tagInputController.clear();
-                            _tagFocusNode.requestFocus();
-                          }
-                        },
-                        onFieldSubmitted: (value) {
-                          _addIngredientTag(value);
-                        },
+                    // Dish Name Input
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Dish Name',
+                        hintText: 'e.g., Spaghetti Carbonara',
+                      ),
+                      style: const TextStyle(color: AppTheme.textPrimary),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Please enter the dish name';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Category Selector Label
+                    const Text(
+                      'Category',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(height: 8),
+
+                    // Category ChoiceChips Wrap
+                    Wrap(
+                      spacing: 8,
+                      children: _categories.map((cat) {
+                        final isSelected = _formCategory == cat;
+                        final displayLabel = cat == 'Snack' ? 'Snack' : cat;
+                        return ChoiceChip(
+                          label: Text(displayLabel),
+                          selected: isSelected,
+                          selectedColor: AppTheme.accent.withValues(alpha: 0.2),
+                          checkmarkColor: AppTheme.accent,
+                          labelStyle: TextStyle(
+                            color: isSelected ? AppTheme.accent : AppTheme.textSecondary,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() {
+                                _formCategory = cat;
+                              });
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Ingredients Tag Label
+                    const Text(
+                      'Ingredients',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Ingredient Tag Input
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _tagInputController,
+                            focusNode: _tagFocusNode,
+                            decoration: const InputDecoration(
+                              hintText: 'Type ingredient (e.g. Eggs)',
+                            ),
+                            style: const TextStyle(color: AppTheme.textPrimary),
+                            onSubmitted: _addIngredientTag,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle, color: AppTheme.accent),
+                          onPressed: () => _addIngredientTag(_tagInputController.text),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Added Ingredients Chips Wrap
+                    if (_tempIngredients.isNotEmpty) ...[
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _tempIngredients.map((ing) {
+                          return Chip(
+                            backgroundColor: const Color(0xFF0F172A),
+                            label: Text(ing),
+                            deleteIcon: const Icon(Icons.cancel, size: 16, color: AppTheme.textSecondary),
+                            labelStyle: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(color: Color(0xFF334155)),
+                            ),
+                            onDeleted: () {
+                              setState(() {
+                                _tempIngredients.remove(ing);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+
+                    // Submit Button
                     ElevatedButton(
                       onPressed: () {
-                        _addIngredientTag(_tagInputController.text);
+                        if (_formKey.currentState!.validate()) {
+                          final newMeal = Meal(
+                            id: const Uuid().v4(),
+                            name: _nameController.text.trim(),
+                            category: _formCategory,
+                            ingredients: _tempIngredients,
+                          );
+
+                          context.read<DietBloc>().add(AddMealToLibrary(newMeal));
+                          Navigator.pop(context);
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.accent,
                         foregroundColor: AppTheme.background,
-                        padding: const EdgeInsets.all(12),
-                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Icon(Icons.add, size: 24),
+                      child: const Text(
+                        'Save Dish',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
                     ),
                   ],
                 ),
-
-                // Ingredient Tags Wrap
-                if (_tempIngredients.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _tempIngredients.map((ing) {
-                      return InputChip(
-                        label: Text(ing),
-                        backgroundColor: const Color(0xFF0F172A),
-                        deleteIcon: const Icon(Icons.cancel, size: 16, color: AppTheme.textSecondary),
-                        labelStyle: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: const BorderSide(color: Color(0xFF334155)),
-                        ),
-                        onDeleted: () {
-                          setState(() {
-                            _tempIngredients.remove(ing);
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ],
-                const SizedBox(height: 28),
-
-                // Submit Button
-                ElevatedButton(
-                  onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      final newMeal = Meal(
-                        id: const Uuid().v4(),
-                        name: _nameController.text.trim(),
-                        category: _formCategory,
-                        ingredients: _tempIngredients,
-                      );
-
-                      context.read<DietBloc>().add(AddMealToLibrary(newMeal));
-                      Navigator.pop(context);
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.accent,
-                    foregroundColor: AppTheme.background,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Save Dish',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

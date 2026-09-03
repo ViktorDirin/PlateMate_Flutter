@@ -17,6 +17,8 @@ import 'ui/screens/meals_library_screen.dart';
 import 'ui/screens/grocery_list_screen.dart';
 import 'ui/screens/slots_management_screen.dart';
 import 'ui/screens/auth_screen.dart';
+import 'ui/widgets/food_logging_dialog.dart';
+import 'ui/widgets/meal_nutrition_breakdown_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -453,7 +455,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildEmptySlot(String slotId, String slotName) {
+  Widget _buildEmptySlot(String slotId, String slotName, DayPlan dayPlan) {
+    final isActual = dayPlan.slotIsActual[slotId] ?? false;
+    if (isActual) {
+      return _buildActualSlot(slotId, slotName, dayPlan);
+    }
+
     return DashedContainer(
       color: const Color(0xFF475569), // Slate grey dashed outline
       child: Container(
@@ -469,20 +476,41 @@ class _HomeScreenState extends State<HomeScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            ElevatedButton.icon(
-              onPressed: () => _pickMealForSlot(context, _selectedDate, slotId, slotName),
-              icon: const Icon(Icons.add, size: 14),
-              label: Text('Add $slotName', style: const TextStyle(fontSize: 13)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.cardBg,
-                foregroundColor: AppTheme.accent,
-                side: const BorderSide(color: Color(0xFF334155)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => FoodLoggingDialog.show(
+                    context,
+                    date: _selectedDate,
+                    slotId: slotId,
+                    slotName: slotName,
+                  ),
+                  icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                  label: const Text('Log (AI)', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.accent,
+                    side: const BorderSide(color: Color(0xFF334155)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
-                elevation: 0,
-              ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: () => _pickMealForSlot(context, _selectedDate, slotId, slotName),
+                  icon: const Icon(Icons.add, size: 14),
+                  label: Text('Add $slotName', style: const TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.cardBg,
+                    foregroundColor: AppTheme.accent,
+                    side: const BorderSide(color: Color(0xFF334155)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -491,6 +519,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSelectedSlot(String slotId, String slotName, Meal meal, DayPlan dayPlan) {
+    final isActual = dayPlan.slotIsActual[slotId] ?? false;
+    if (isActual) {
+      return _buildActualSlot(slotId, slotName, dayPlan, plannedMeal: meal);
+    }
+
     final isCompleted = dayPlan.slotCompleted[slotId] ?? false;
     final completedAt = dayPlan.slotCompletedAt[slotId];
 
@@ -510,44 +543,70 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // Category tag & Eaten badge
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
-                      ),
-                      child: Text(
-                        slotName,
-                        style: const TextStyle(
-                          color: AppTheme.accent,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
+                        ),
+                        child: Text(
+                          slotName,
+                          style: const TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                    if (isCompleted && completedAt != null) ...[
-                      const SizedBox(width: 8),
-                      _buildEatenTimeBadge(slotId, completedAt),
+                      if (isCompleted && completedAt != null)
+                        _buildEatenTimeBadge(slotId, completedAt),
                     ],
-                  ],
-                ),
-                // Change / Edit action
-                TextButton.icon(
-                  onPressed: () => _pickMealForSlot(context, _selectedDate, slotId, slotName),
-                  icon: const Icon(Icons.swap_horiz, size: 14),
-                  label: const Text('Change', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.textSecondary,
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
+                ),
+                // Actions: Log Food (AI) & Change
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => FoodLoggingDialog.show(
+                        context,
+                        date: _selectedDate,
+                        slotId: slotId,
+                        slotName: slotName,
+                        initialMealName: meal.name,
+                      ),
+                      icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                      label: const Text('Log (AI)', style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.accent,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton.icon(
+                      onPressed: () => _pickMealForSlot(context, _selectedDate, slotId, slotName),
+                      icon: const Icon(Icons.swap_horiz, size: 14),
+                      label: const Text('Change', style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.textSecondary,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -616,9 +675,250 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildActualSlot(String slotId, String slotName, DayPlan dayPlan, {Meal? plannedMeal}) {
+    final actualName = dayPlan.slotActualMealName[slotId] ?? plannedMeal?.name ?? 'Logged Meal';
+    final calories = dayPlan.slotCalories[slotId] ?? 0.0;
+    final protein = dayPlan.slotProtein[slotId] ?? 0.0;
+    final fats = dayPlan.slotFats[slotId] ?? 0.0;
+    final carbs = dayPlan.slotCarbs[slotId] ?? 0.0;
+    final fiber = dayPlan.slotFiber[slotId] ?? 0.0;
+    final userNote = dayPlan.slotUserNote[slotId];
+    final completedAt = dayPlan.slotCompletedAt[slotId];
+    final aiBreakdown = dayPlan.slotAiBreakdown[slotId];
+
+    void openBreakdown() {
+      MealNutritionBreakdownDialog.show(
+        context,
+        date: _selectedDate,
+        slotId: slotId,
+        slotName: slotName,
+        mealName: actualName,
+        calories: calories,
+        protein: protein,
+        fats: fats,
+        carbs: carbs,
+        fiber: fiber,
+        userNote: userNote,
+        aiBreakdown: aiBreakdown,
+        completedAt: completedAt,
+      );
+    }
+
+    return Card(
+      color: const Color(0xFF1E293B),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(
+          color: Color(0xFF10B981),
+          width: 1.2,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: openBreakdown,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top Bar
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
+                              SizedBox(width: 4),
+                              Text(
+                                'Logged',
+                                style: TextStyle(
+                                  color: Color(0xFF10B981),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          slotName,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (completedAt != null)
+                          _buildEatenTimeBadge(slotId, completedAt),
+                      ],
+                    ),
+                  ),
+                  // Actions Menu / Re-log & Reset & Details
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.info_outline, color: AppTheme.textSecondary, size: 18),
+                        tooltip: 'View Nutrition Breakdown',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: openBreakdown,
+                      ),
+                      const SizedBox(width: 4),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 18),
+                        color: const Color(0xFF0F172A),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onSelected: (val) {
+                          if (val == 'details') {
+                            openBreakdown();
+                          } else if (val == 'relog') {
+                            FoodLoggingDialog.show(
+                              context,
+                              date: _selectedDate,
+                              slotId: slotId,
+                              slotName: slotName,
+                              initialMealName: actualName,
+                            );
+                          } else if (val == 'reset') {
+                            context.read<DietBloc>().add(
+                                  ClearActualMeal(
+                                    date: _selectedDate,
+                                    slotId: slotId,
+                                  ),
+                                );
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            value: 'details',
+                            child: Row(
+                              children: [
+                                Icon(Icons.analytics_outlined, color: Color(0xFF10B981), size: 16),
+                                SizedBox(width: 8),
+                                Text('View Breakdown', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'relog',
+                            child: Row(
+                              children: [
+                                Icon(Icons.camera_alt_outlined, color: AppTheme.accent, size: 16),
+                                SizedBox(width: 8),
+                                Text('Re-log with AI', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'reset',
+                            child: Row(
+                              children: [
+                                Icon(Icons.restart_alt, color: AppTheme.error, size: 16),
+                                SizedBox(width: 8),
+                                Text('Reset to Plan', style: TextStyle(color: AppTheme.error, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Actual Meal Name
+              Text(
+                actualName,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              if (plannedMeal != null && plannedMeal.name != actualName) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Planned: ${plannedMeal.name}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+
+              // Macro summary chips row
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: _buildMacroChip('${calories.toStringAsFixed(0)} kcal', 'Calories', const Color(0xFFF59E0B))),
+                    Expanded(child: _buildMacroChip('${protein.toStringAsFixed(1)}g', 'P', const Color(0xFFEF4444))),
+                    Expanded(child: _buildMacroChip('${fats.toStringAsFixed(1)}g', 'F', const Color(0xFFEAB308))),
+                    Expanded(child: _buildMacroChip('${carbs.toStringAsFixed(1)}g', 'C', const Color(0xFF3B82F6))),
+                    Expanded(child: _buildMacroChip('${fiber.toStringAsFixed(1)}g', 'Fiber', const Color(0xFF10B981))),
+                  ],
+                ),
+              ),
+
+              if (userNote != null && userNote.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.notes, size: 14, color: AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        userNote,
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSnacksSection(BuildContext context, MealSlotConfig slotConfig, DayPlan dayPlan, List<Meal> library) {
     final slotId = slotConfig.id;
     final slotName = slotConfig.name;
+
+    final isActual = dayPlan.slotIsActual[slotId] ?? false;
+    if (isActual) {
+      return _buildActualSlot(slotId, slotName, dayPlan);
+    }
+
     final mealIds = dayPlan.slotMeals[slotId] ?? [];
 
     if (mealIds.isEmpty) {
@@ -637,20 +937,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              ElevatedButton.icon(
-                onPressed: () => _pickSnackForSlot(context, _selectedDate, slotId, slotName),
-                icon: const Icon(Icons.add, size: 14),
-                label: Text('Add $slotName', style: const TextStyle(fontSize: 13)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.cardBg,
-                  foregroundColor: AppTheme.accent,
-                  side: const BorderSide(color: Color(0xFF334155)),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => FoodLoggingDialog.show(
+                      context,
+                      date: _selectedDate,
+                      slotId: slotId,
+                      slotName: slotName,
+                    ),
+                    icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                    label: const Text('Log (AI)', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.accent,
+                      side: const BorderSide(color: Color(0xFF334155)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
                   ),
-                  elevation: 0,
-                ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _pickSnackForSlot(context, _selectedDate, slotId, slotName),
+                    icon: const Icon(Icons.add, size: 14),
+                    label: Text('Add $slotName', style: const TextStyle(fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.cardBg,
+                      foregroundColor: AppTheme.accent,
+                      side: const BorderSide(color: Color(0xFF334155)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -706,16 +1027,37 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ],
                 ),
-                TextButton.icon(
-                  onPressed: () => _pickSnackForSlot(context, _selectedDate, slotId, slotName),
-                  icon: const Icon(Icons.add, size: 14),
-                  label: const Text('Add', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.accent,
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => FoodLoggingDialog.show(
+                        context,
+                        date: _selectedDate,
+                        slotId: slotId,
+                        slotName: slotName,
+                      ),
+                      icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                      label: const Text('Log (AI)', style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.accent,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton.icon(
+                      onPressed: () => _pickSnackForSlot(context, _selectedDate, slotId, slotName),
+                      icon: const Icon(Icons.add, size: 14),
+                      label: const Text('Add', style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.accent,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -789,6 +1131,105 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildDailyMacroSummary(DayPlan dayPlan) {
+    double totalCalories = 0.0;
+    double totalProtein = 0.0;
+    double totalFats = 0.0;
+    double totalCarbs = 0.0;
+    double totalFiber = 0.0;
+    int loggedMealsCount = 0;
+
+    dayPlan.slotIsActual.forEach((slotId, isActual) {
+      if (isActual) {
+        loggedMealsCount++;
+        totalCalories += dayPlan.slotCalories[slotId] ?? 0.0;
+        totalProtein += dayPlan.slotProtein[slotId] ?? 0.0;
+        totalFats += dayPlan.slotFats[slotId] ?? 0.0;
+        totalCarbs += dayPlan.slotCarbs[slotId] ?? 0.0;
+        totalFiber += dayPlan.slotFiber[slotId] ?? 0.0;
+      }
+    });
+
+    if (loggedMealsCount == 0) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.pie_chart_outline, size: 16, color: AppTheme.accent),
+                  SizedBox(width: 6),
+                  Text(
+                    'Daily Actual Nutrition',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                '$loggedMealsCount logged',
+                style: const TextStyle(
+                  color: Color(0xFF10B981),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: _buildMacroChip('${totalCalories.toStringAsFixed(0)} kcal', 'Calories', const Color(0xFFF59E0B))),
+              Expanded(child: _buildMacroChip('${totalProtein.toStringAsFixed(1)}g', 'Protein', const Color(0xFFEF4444))),
+              Expanded(child: _buildMacroChip('${totalFats.toStringAsFixed(1)}g', 'Fats', const Color(0xFFEAB308))),
+              Expanded(child: _buildMacroChip('${totalCarbs.toStringAsFixed(1)}g', 'Carbs', const Color(0xFF3B82F6))),
+              Expanded(child: _buildMacroChip('${totalFiber.toStringAsFixed(1)}g', 'Fiber', const Color(0xFF10B981))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMacroChip(String value, String label, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPlannerBody() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -801,7 +1242,18 @@ class _HomeScreenState extends State<HomeScreen> {
         BlocBuilder<DietBloc, DietState>(
           builder: (context, state) => _buildLastMealBanner(state),
         ),
-        const SizedBox(height: 8),
+
+        // Daily Actual Nutrition Macro Summary
+        BlocBuilder<DietBloc, DietState>(
+          builder: (context, state) {
+            final dayPlan = state.dayPlans.firstWhere(
+              (p) => _isSameDate(p.date, _selectedDate),
+              orElse: () => DayPlan(date: _selectedDate, slotMeals: const {}),
+            );
+            return _buildDailyMacroSummary(dayPlan);
+          },
+        ),
+        const SizedBox(height: 4),
 
         // Divider
         const Padding(
@@ -899,7 +1351,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     final meal = getMeal(mealId);
 
                     return meal == null
-                        ? _buildEmptySlot(slotConfig.id, slotConfig.name)
+                        ? _buildEmptySlot(slotConfig.id, slotConfig.name, dayPlan)
                         : _buildSelectedSlot(slotConfig.id, slotConfig.name, meal, dayPlan);
                   }
                 },

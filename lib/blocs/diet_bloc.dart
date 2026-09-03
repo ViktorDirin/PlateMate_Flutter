@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/meal.dart';
@@ -105,6 +106,44 @@ class UpdateMealCompletionTime extends DietEvent {
   final String slotId;
   final DateTime completedAt;
   UpdateMealCompletionTime({required this.date, required this.slotId, required this.completedAt});
+}
+
+class LogActualMeal extends DietEvent {
+  final DateTime date;
+  final String slotId;
+  final String actualMealName;
+  final double calories;
+  final double protein;
+  final double fats;
+  final double carbs;
+  final double fiber;
+  final String? userNote;
+  final dynamic aiBreakdown;
+  final DateTime? completedAt;
+
+  LogActualMeal({
+    required this.date,
+    required this.slotId,
+    required this.actualMealName,
+    required this.calories,
+    required this.protein,
+    required this.fats,
+    required this.carbs,
+    required this.fiber,
+    this.userNote,
+    this.aiBreakdown,
+    this.completedAt,
+  });
+}
+
+class ClearActualMeal extends DietEvent {
+  final DateTime date;
+  final String slotId;
+
+  ClearActualMeal({
+    required this.date,
+    required this.slotId,
+  });
 }
 
 class SyncDataFromSupabase extends DietEvent {}
@@ -241,6 +280,8 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
     on<SyncDataFromSupabase>(_onSyncDataFromSupabase);
     on<ToggleMealCompletion>(_onToggleMealCompletion);
     on<UpdateMealCompletionTime>(_onUpdateMealCompletionTime);
+    on<LogActualMeal>(_onLogActualMeal);
+    on<ClearActualMeal>(_onClearActualMeal);
   }
 
   bool _isSameDate(DateTime a, DateTime b) {
@@ -709,6 +750,15 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
     final Map<String, List<String>> clearedIngredients = {};
     final Map<String, Map<String, bool>> slotCompleted = {};
     final Map<String, Map<String, DateTime?>> slotCompletedAt = {};
+    final Map<String, Map<String, bool>> slotIsActual = {};
+    final Map<String, Map<String, String?>> slotActualMealName = {};
+    final Map<String, Map<String, double?>> slotCalories = {};
+    final Map<String, Map<String, double?>> slotProtein = {};
+    final Map<String, Map<String, double?>> slotFats = {};
+    final Map<String, Map<String, double?>> slotCarbs = {};
+    final Map<String, Map<String, double?>> slotFiber = {};
+    final Map<String, Map<String, String?>> slotUserNote = {};
+    final Map<String, Map<String, dynamic>> slotAiBreakdown = {};
     final Map<String, DateTime> dates = {};
 
     for (final row in rows) {
@@ -720,6 +770,15 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       final bool isCompleted = row['is_completed'] as bool? ?? false;
       final String? completedAtStr = row['completed_at'] as String?;
       final DateTime? completedAt = completedAtStr != null ? DateTime.parse(completedAtStr) : null;
+      final bool isActual = row['is_actual'] as bool? ?? false;
+      final String? actualMealName = row['actual_meal_name'] as String?;
+      final double? calories = (row['calories'] as num?)?.toDouble();
+      final double? protein = (row['protein'] as num?)?.toDouble();
+      final double? fats = (row['fats'] as num?)?.toDouble();
+      final double? carbs = (row['carbs'] as num?)?.toDouble();
+      final double? fiber = (row['fiber'] as num?)?.toDouble();
+      final String? userNote = row['user_note'] as String?;
+      final dynamic aiBreakdown = row['ai_breakdown'];
 
       dates[dateStr] = date;
       
@@ -746,6 +805,51 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
         slotCompletedAt[dateStr] = {};
       }
       slotCompletedAt[dateStr]![slotId] = completedAt;
+
+      if (!slotIsActual.containsKey(dateStr)) {
+        slotIsActual[dateStr] = {};
+      }
+      slotIsActual[dateStr]![slotId] = isActual;
+
+      if (!slotActualMealName.containsKey(dateStr)) {
+        slotActualMealName[dateStr] = {};
+      }
+      slotActualMealName[dateStr]![slotId] = actualMealName;
+
+      if (!slotCalories.containsKey(dateStr)) {
+        slotCalories[dateStr] = {};
+      }
+      slotCalories[dateStr]![slotId] = calories;
+
+      if (!slotProtein.containsKey(dateStr)) {
+        slotProtein[dateStr] = {};
+      }
+      slotProtein[dateStr]![slotId] = protein;
+
+      if (!slotFats.containsKey(dateStr)) {
+        slotFats[dateStr] = {};
+      }
+      slotFats[dateStr]![slotId] = fats;
+
+      if (!slotCarbs.containsKey(dateStr)) {
+        slotCarbs[dateStr] = {};
+      }
+      slotCarbs[dateStr]![slotId] = carbs;
+
+      if (!slotFiber.containsKey(dateStr)) {
+        slotFiber[dateStr] = {};
+      }
+      slotFiber[dateStr]![slotId] = fiber;
+
+      if (!slotUserNote.containsKey(dateStr)) {
+        slotUserNote[dateStr] = {};
+      }
+      slotUserNote[dateStr]![slotId] = userNote;
+
+      if (!slotAiBreakdown.containsKey(dateStr)) {
+        slotAiBreakdown[dateStr] = {};
+      }
+      slotAiBreakdown[dateStr]![slotId] = aiBreakdown;
     }
 
     return groupedMeals.entries.map((entry) {
@@ -757,6 +861,15 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
         clearedIngredients: clearedIngredients[dateStr] ?? [],
         slotCompleted: slotCompleted[dateStr] ?? {},
         slotCompletedAt: slotCompletedAt[dateStr] ?? {},
+        slotIsActual: slotIsActual[dateStr] ?? {},
+        slotActualMealName: slotActualMealName[dateStr] ?? {},
+        slotCalories: slotCalories[dateStr] ?? {},
+        slotProtein: slotProtein[dateStr] ?? {},
+        slotFats: slotFats[dateStr] ?? {},
+        slotCarbs: slotCarbs[dateStr] ?? {},
+        slotFiber: slotFiber[dateStr] ?? {},
+        slotUserNote: slotUserNote[dateStr] ?? {},
+        slotAiBreakdown: slotAiBreakdown[dateStr] ?? {},
       );
     }).toList();
   }
@@ -863,16 +976,69 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       }
 
       // 3. Fetch day plans
-      final plansResponse = await client.from('day_plans').select();
-      final plans = _parseDayPlansFromSupabase(plansResponse as List<dynamic>);
+      List<DayPlan> supabasePlans = [];
+      try {
+        debugPrint('[DietBloc Sync] Fetching day_plans from Supabase for user $userId...');
+        final plansResponse = await client.from('day_plans').select().eq('user_id', userId);
+        supabasePlans = _parseDayPlansFromSupabase(plansResponse as List<dynamic>);
+        debugPrint('[DietBloc Sync] Fetched ${supabasePlans.length} day plans from Supabase.');
+      } catch (plansErr) {
+        debugPrint('[DietBloc Sync Error] Error fetching day_plans from Supabase: $plansErr');
+      }
+
+      // Merge Supabase plans into current day plans (so local HydratedBloc plans are preserved and enhanced)
+      final mergedPlansMap = <String, DayPlan>{};
+      for (final p in state.dayPlans) {
+        final dateKey = DateFormat('yyyy-MM-dd').format(p.date);
+        mergedPlansMap[dateKey] = p;
+      }
+
+      for (final sp in supabasePlans) {
+        final dateKey = DateFormat('yyyy-MM-dd').format(sp.date);
+        if (mergedPlansMap.containsKey(dateKey)) {
+          final existing = mergedPlansMap[dateKey]!;
+          
+          final slotMeals = Map<String, List<String>>.from(existing.slotMeals);
+          slotMeals.addAll(sp.slotMeals);
+
+          final slotCompleted = Map<String, bool>.from(existing.slotCompleted)..addAll(sp.slotCompleted);
+          final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt)..addAll(sp.slotCompletedAt);
+          final slotIsActual = Map<String, bool>.from(existing.slotIsActual)..addAll(sp.slotIsActual);
+          final slotActualMealName = Map<String, String?>.from(existing.slotActualMealName)..addAll(sp.slotActualMealName);
+          final slotCalories = Map<String, double?>.from(existing.slotCalories)..addAll(sp.slotCalories);
+          final slotProtein = Map<String, double?>.from(existing.slotProtein)..addAll(sp.slotProtein);
+          final slotFats = Map<String, double?>.from(existing.slotFats)..addAll(sp.slotFats);
+          final slotCarbs = Map<String, double?>.from(existing.slotCarbs)..addAll(sp.slotCarbs);
+          final slotFiber = Map<String, double?>.from(existing.slotFiber)..addAll(sp.slotFiber);
+          final slotUserNote = Map<String, String?>.from(existing.slotUserNote)..addAll(sp.slotUserNote);
+          final slotAiBreakdown = Map<String, dynamic>.from(existing.slotAiBreakdown)..addAll(sp.slotAiBreakdown);
+
+          mergedPlansMap[dateKey] = existing.copyWith(
+            slotMeals: slotMeals,
+            slotCompleted: slotCompleted,
+            slotCompletedAt: slotCompletedAt,
+            slotIsActual: slotIsActual,
+            slotActualMealName: slotActualMealName,
+            slotCalories: slotCalories,
+            slotProtein: slotProtein,
+            slotFats: slotFats,
+            slotCarbs: slotCarbs,
+            slotFiber: slotFiber,
+            slotUserNote: slotUserNote,
+            slotAiBreakdown: slotAiBreakdown,
+          );
+        } else {
+          mergedPlansMap[dateKey] = sp;
+        }
+      }
 
       emit(state.copyWith(
         mealsLibrary: meals,
         mealSlots: slots,
-        dayPlans: plans,
+        dayPlans: mergedPlansMap.values.toList(),
       ));
     } catch (e) {
-      debugPrint('Error syncing from Supabase: $e');
+      debugPrint('[DietBloc Sync Error] Error syncing from Supabase: $e');
     }
   }
 
@@ -916,7 +1082,7 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       final client = Supabase.instance.client;
       final userId = client.auth.currentUser?.id;
       if (userId != null) {
-        final dateStr = event.date.toIso8601String().substring(0, 10);
+        final dateStr = DateFormat('yyyy-MM-dd').format(event.date);
         final completedAtStr = event.isCompleted ? DateTime.now().toIso8601String() : null;
         final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
 
@@ -928,7 +1094,9 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
           'cleared_ingredients': updatedPlan.clearedIngredients,
           'is_completed': event.isCompleted,
           'completed_at': completedAtStr,
-        }).then((_) {}, onError: (e) => debugPrint('Supabase toggle completion error: $e'));
+        }, onConflict: 'user_id,date,slot_id').then((_) {
+          debugPrint('[DietBloc] Successfully updated meal completion for $dateStr / ${event.slotId}');
+        }, onError: (e) => debugPrint('[DietBloc Error] Supabase toggle completion error: $e'));
       }
     } catch (e) {
       debugPrint('Supabase client access error (potentially in tests): $e');
@@ -970,7 +1138,7 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
       final client = Supabase.instance.client;
       final userId = client.auth.currentUser?.id;
       if (userId != null) {
-        final dateStr = event.date.toIso8601String().substring(0, 10);
+        final dateStr = DateFormat('yyyy-MM-dd').format(event.date);
         final completedAtStr = event.completedAt.toIso8601String();
         final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
 
@@ -982,10 +1150,192 @@ class DietBloc extends HydratedBloc<DietEvent, DietState> {
           'cleared_ingredients': updatedPlan.clearedIngredients,
           'is_completed': true,
           'completed_at': completedAtStr,
-        }).then((_) {}, onError: (e) => debugPrint('Supabase update completion time error: $e'));
+        }, onConflict: 'user_id,date,slot_id').then((_) {
+          debugPrint('[DietBloc] Successfully updated completion time for $dateStr / ${event.slotId}');
+        }, onError: (e) => debugPrint('[DietBloc Error] Supabase update completion time error: $e'));
       }
     } catch (e) {
       debugPrint('Supabase client access error (potentially in tests): $e');
+    }
+  }
+
+  void _onLogActualMeal(LogActualMeal event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+    DayPlan updatedPlan;
+
+    final completedAt = event.completedAt ?? DateTime.now();
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotCompleted = Map<String, bool>.from(existing.slotCompleted);
+      final slotCompletedAt = Map<String, DateTime?>.from(existing.slotCompletedAt);
+      final slotIsActual = Map<String, bool>.from(existing.slotIsActual);
+      final slotActualMealName = Map<String, String?>.from(existing.slotActualMealName);
+      final slotCalories = Map<String, double?>.from(existing.slotCalories);
+      final slotProtein = Map<String, double?>.from(existing.slotProtein);
+      final slotFats = Map<String, double?>.from(existing.slotFats);
+      final slotCarbs = Map<String, double?>.from(existing.slotCarbs);
+      final slotFiber = Map<String, double?>.from(existing.slotFiber);
+      final slotUserNote = Map<String, String?>.from(existing.slotUserNote);
+      final slotAiBreakdown = Map<String, dynamic>.from(existing.slotAiBreakdown);
+
+      slotCompleted[event.slotId] = true;
+      slotCompletedAt[event.slotId] = completedAt;
+      slotIsActual[event.slotId] = true;
+      slotActualMealName[event.slotId] = event.actualMealName;
+      slotCalories[event.slotId] = event.calories;
+      slotProtein[event.slotId] = event.protein;
+      slotFats[event.slotId] = event.fats;
+      slotCarbs[event.slotId] = event.carbs;
+      slotFiber[event.slotId] = event.fiber;
+      slotUserNote[event.slotId] = event.userNote;
+      slotAiBreakdown[event.slotId] = event.aiBreakdown;
+
+      updatedPlan = existing.copyWith(
+        slotCompleted: slotCompleted,
+        slotCompletedAt: slotCompletedAt,
+        slotIsActual: slotIsActual,
+        slotActualMealName: slotActualMealName,
+        slotCalories: slotCalories,
+        slotProtein: slotProtein,
+        slotFats: slotFats,
+        slotCarbs: slotCarbs,
+        slotFiber: slotFiber,
+        slotUserNote: slotUserNote,
+        slotAiBreakdown: slotAiBreakdown,
+      );
+      plans[index] = updatedPlan;
+    } else {
+      updatedPlan = DayPlan(
+        date: event.date,
+        slotMeals: const {},
+        slotCompleted: {event.slotId: true},
+        slotCompletedAt: {event.slotId: completedAt},
+        slotIsActual: {event.slotId: true},
+        slotActualMealName: {event.slotId: event.actualMealName},
+        slotCalories: {event.slotId: event.calories},
+        slotProtein: {event.slotId: event.protein},
+        slotFats: {event.slotId: event.fats},
+        slotCarbs: {event.slotId: event.carbs},
+        slotFiber: {event.slotId: event.fiber},
+        slotUserNote: {event.slotId: event.userNote},
+        slotAiBreakdown: {event.slotId: event.aiBreakdown},
+      );
+      plans.add(updatedPlan);
+    }
+
+    emit(state.copyWith(dayPlans: plans));
+
+    // Supabase background sync
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final dateStr = DateFormat('yyyy-MM-dd').format(event.date);
+        final completedAtStr = completedAt.toIso8601String();
+        final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
+
+        debugPrint('[DietBloc] Upserting actual meal to Supabase: user=$userId, date=$dateStr, slot=${event.slotId}, name="${event.actualMealName}"');
+        client.from('day_plans').upsert({
+          'user_id': userId,
+          'date': dateStr,
+          'slot_id': event.slotId,
+          'meal_ids': mealIds,
+          'cleared_ingredients': updatedPlan.clearedIngredients,
+          'is_completed': true,
+          'completed_at': completedAtStr,
+          'is_actual': true,
+          'actual_meal_name': event.actualMealName,
+          'calories': event.calories,
+          'protein': event.protein,
+          'fats': event.fats,
+          'carbs': event.carbs,
+          'fiber': event.fiber,
+          'user_note': event.userNote,
+          'ai_breakdown': event.aiBreakdown,
+        }, onConflict: 'user_id,date,slot_id').then((_) {
+          debugPrint('[DietBloc SUCCESS] Saved actual meal "${event.actualMealName}" to Supabase.');
+        }, onError: (e) => debugPrint('[DietBloc ERROR] Supabase log actual meal error: $e'));
+      }
+    } catch (e) {
+      debugPrint('Supabase client access error (potentially in tests): $e');
+    }
+  }
+
+  void _onClearActualMeal(ClearActualMeal event, Emitter<DietState> emit) {
+    final plans = List<DayPlan>.from(state.dayPlans);
+    final index = plans.indexWhere((p) => _isSameDate(p.date, event.date));
+
+    if (index >= 0) {
+      final existing = plans[index];
+      final slotIsActual = Map<String, bool>.from(existing.slotIsActual);
+      final slotActualMealName = Map<String, String?>.from(existing.slotActualMealName);
+      final slotCalories = Map<String, double?>.from(existing.slotCalories);
+      final slotProtein = Map<String, double?>.from(existing.slotProtein);
+      final slotFats = Map<String, double?>.from(existing.slotFats);
+      final slotCarbs = Map<String, double?>.from(existing.slotCarbs);
+      final slotFiber = Map<String, double?>.from(existing.slotFiber);
+      final slotUserNote = Map<String, String?>.from(existing.slotUserNote);
+      final slotAiBreakdown = Map<String, dynamic>.from(existing.slotAiBreakdown);
+
+      slotIsActual.remove(event.slotId);
+      slotActualMealName.remove(event.slotId);
+      slotCalories.remove(event.slotId);
+      slotProtein.remove(event.slotId);
+      slotFats.remove(event.slotId);
+      slotCarbs.remove(event.slotId);
+      slotFiber.remove(event.slotId);
+      slotUserNote.remove(event.slotId);
+      slotAiBreakdown.remove(event.slotId);
+
+      final updatedPlan = existing.copyWith(
+        slotIsActual: slotIsActual,
+        slotActualMealName: slotActualMealName,
+        slotCalories: slotCalories,
+        slotProtein: slotProtein,
+        slotFats: slotFats,
+        slotCarbs: slotCarbs,
+        slotFiber: slotFiber,
+        slotUserNote: slotUserNote,
+        slotAiBreakdown: slotAiBreakdown,
+      );
+      plans[index] = updatedPlan;
+      emit(state.copyWith(dayPlans: plans));
+
+      // Supabase background sync
+      try {
+        final client = Supabase.instance.client;
+        final userId = client.auth.currentUser?.id;
+        if (userId != null) {
+          final dateStr = DateFormat('yyyy-MM-dd').format(event.date);
+          final mealIds = updatedPlan.slotMeals[event.slotId] ?? [];
+
+          debugPrint('[DietBloc] Clearing actual meal in Supabase: user=$userId, date=$dateStr, slot=${event.slotId}');
+          client.from('day_plans').upsert({
+            'user_id': userId,
+            'date': dateStr,
+            'slot_id': event.slotId,
+            'meal_ids': mealIds,
+            'cleared_ingredients': updatedPlan.clearedIngredients,
+            'is_completed': updatedPlan.slotCompleted[event.slotId] ?? false,
+            'completed_at': updatedPlan.slotCompletedAt[event.slotId]?.toIso8601String(),
+            'is_actual': false,
+            'actual_meal_name': null,
+            'calories': null,
+            'protein': null,
+            'fats': null,
+            'carbs': null,
+            'fiber': null,
+            'user_note': null,
+            'ai_breakdown': null,
+          }, onConflict: 'user_id,date,slot_id').then((_) {
+            debugPrint('[DietBloc SUCCESS] Cleared actual meal in Supabase for $dateStr / ${event.slotId}');
+          }, onError: (e) => debugPrint('[DietBloc ERROR] Supabase clear actual meal error: $e'));
+        }
+      } catch (e) {
+        debugPrint('Supabase client access error (potentially in tests): $e');
+      }
     }
   }
 
