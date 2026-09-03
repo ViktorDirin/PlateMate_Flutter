@@ -268,9 +268,24 @@ class _MealsLibraryScreenState extends State<MealsLibraryScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 16),
+                                  ] else ...[
+                                    ElevatedButton.icon(
+                                      onPressed: () => _showAddToTodayDialog(context, meal),
+                                      icon: const Icon(Icons.today_outlined, size: 14),
+                                      label: const Text('Add to Today', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.accent.withValues(alpha: 0.15),
+                                        foregroundColor: AppTheme.accent,
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
                                   ],
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline, color: AppTheme.error),
+                                    tooltip: 'Delete dish',
                                     onPressed: () {
                                       showDialog(
                                         context: context,
@@ -324,6 +339,210 @@ class _MealsLibraryScreenState extends State<MealsLibraryScreen> {
         child: const Icon(Icons.add),
       ),
     );
+  }
+
+  void _showAddToTodayDialog(BuildContext context, Meal meal) {
+    final state = context.read<DietBloc>().state;
+    final slots = state.mealSlots;
+    if (slots.isEmpty) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF334155), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.today_outlined, color: AppTheme.accent, size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Add to Today',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+                    onPressed: () => Navigator.pop(ctx),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              // Meal Info Card
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.restaurant_menu, color: AppTheme.accent, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            meal.name,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Category: ${meal.category}',
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Select Meal Slot:',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Slots list
+              ...slots.map((slot) {
+                final isMatchingCategory =
+                    slot.name.toLowerCase().contains(meal.category.toLowerCase()) ||
+                    meal.category.toLowerCase().contains(slot.name.toLowerCase());
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        final today = DateTime.now();
+                        context.read<DietBloc>().add(
+                              ScheduleMealToSlot(
+                                date: today,
+                                slotId: slot.id,
+                                mealId: meal.id,
+                              ),
+                            );
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('✓ Added "${meal.name}" to ${slot.name} for today!'),
+                            backgroundColor: const Color(0xFF10B981),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isMatchingCategory
+                              ? AppTheme.accent.withValues(alpha: 0.1)
+                              : const Color(0xFF0F172A),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isMatchingCategory
+                                ? AppTheme.accent.withValues(alpha: 0.4)
+                                : const Color(0xFF334155),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  _getSlotEmoji(slot.name),
+                                  style: const TextStyle(fontSize: 18),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  slot.name,
+                                  style: TextStyle(
+                                    color: isMatchingCategory ? AppTheme.accent : AppTheme.textPrimary,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              size: 14,
+                              color: isMatchingCategory ? AppTheme.accent : AppTheme.textSecondary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getSlotEmoji(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('breakfast')) return '🍳';
+    if (lower.contains('lunch')) return '🥗';
+    if (lower.contains('dinner')) return '🍲';
+    if (lower.contains('snack')) return '🍎';
+    return '🍽️';
   }
 }
 

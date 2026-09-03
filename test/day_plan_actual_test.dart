@@ -224,9 +224,11 @@ void main() {
       // Check user note
       expect(find.text('With sesame dressing'), findsOneWidget);
 
-      // Check action buttons
-      expect(find.text('Close'), findsOneWidget);
-      expect(find.text('Re-analyze / Edit'), findsOneWidget);
+      // Check action buttons & bookmark icon
+      expect(find.text('Clear Slot'), findsOneWidget);
+      expect(find.text('Edit'), findsOneWidget);
+      expect(find.text('Re-analyze'), findsOneWidget);
+      expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
     });
   });
 }
