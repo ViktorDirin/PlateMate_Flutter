@@ -21,3 +21,10 @@ All notable changes, implemented sprints, and architectural milestones.
 - Integrated `google_sign_in` package with Supabase `signInWithIdToken`.
 - Added styled dark mode "Continue with Google" button with loading states.
 - Verified successful APK release build execution.
+
+### Sprint 4: AI Food Vision & Factual Nutrition Logging
+- Integrated Cloudflare Workers AI and Supabase Edge Function (`analyze-food`) for fast, accurate meal photo analysis (5–8s).
+- Implemented client-side image compression (max 1024px, JPEG quality 65) to stay well under memory limits.
+- Built centered modal dialogs (`FoodLoggingDialog`, `MealNutritionBreakdownDialog`) for meal capture, confirmation, and detailed macro breakdown.
+- Implemented Supabase persistence and synchronization for factual nutrition fields (`is_actual`, `actual_meal_name`, `calories`, `protein`, `fats`, `carbs`, `fiber`, `user_note`, `ai_breakdown`).
+- Added "Fact-over-Plan" display, macro summary chips, and daily actual totals in Planner screen.
