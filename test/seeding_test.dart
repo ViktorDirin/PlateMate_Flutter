@@ -39,9 +39,20 @@ void main() {
       expect(defaultMeals, isNotEmpty);
       expect(defaultMeals.length, 4);
       expect(defaultMeals[0].name, 'Oatmeal with Berries');
+      expect(defaultMeals[0].calories, 340.0);
+      expect(defaultMeals[0].protein, 9.0);
+      expect(defaultMeals[0].ingredients, contains('Rolled Oats (60g)'));
+
       expect(defaultMeals[1].name, 'Grilled Chicken Salad');
+      expect(defaultMeals[1].calories, 310.0);
+      expect(defaultMeals[1].protein, 38.0);
+      expect(defaultMeals[1].ingredients, contains('Chicken Breast (150g)'));
+
       expect(defaultMeals[2].name, 'Salmon with Steamed Rice');
+      expect(defaultMeals[2].calories, 520.0);
+
       expect(defaultMeals[3].name, 'Greek Yogurt & Walnuts');
+      expect(defaultMeals[3].calories, 240.0);
     });
   });
 

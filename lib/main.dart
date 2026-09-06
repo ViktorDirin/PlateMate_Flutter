@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import 'blocs/diet_bloc.dart';
@@ -13,6 +14,8 @@ import 'core/theme.dart';
 import 'models/meal.dart';
 import 'models/day_plan.dart';
 import 'models/meal_slot_config.dart';
+import 'services/meal_photo_service.dart';
+import 'services/report_export_service.dart';
 import 'ui/screens/meals_library_screen.dart';
 import 'ui/screens/grocery_list_screen.dart';
 import 'ui/screens/slots_management_screen.dart';
@@ -185,6 +188,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   DateTime _selectedDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  DateTime _focusedWeekDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
   Timer? _timer;
 
   @override
@@ -207,10 +211,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  List<DateTime> _generateCurrentWeek() {
-    final now = DateTime.now();
-    final currentWeekday = now.weekday; // 1 = Monday, 7 = Sunday
-    final startOfWeek = now.subtract(Duration(days: currentWeekday - 1));
+  List<DateTime> _generateWeekForDate(DateTime date) {
+    final currentWeekday = date.weekday; // 1 = Monday, 7 = Sunday
+    final startOfWeek = date.subtract(Duration(days: currentWeekday - 1));
     return List.generate(7, (index) => DateTime(
       startOfWeek.year,
       startOfWeek.month,
@@ -218,25 +221,78 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
   }
 
+  void _goToPreviousWeek() {
+    setState(() {
+      _focusedWeekDate = _focusedWeekDate.subtract(const Duration(days: 7));
+    });
+  }
+
+  void _goToNextWeek() {
+    setState(() {
+      _focusedWeekDate = _focusedWeekDate.add(const Duration(days: 7));
+    });
+  }
+
+  void _goToToday() {
+    final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    setState(() {
+      _selectedDate = today;
+      _focusedWeekDate = today;
+    });
+  }
+
+  Future<void> _pickCustomDate(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      builder: (context, child) {
+        return Theme(
+          data: AppTheme.darkTheme.copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AppTheme.accent,
+              onPrimary: AppTheme.background,
+              surface: Color(0xFF1E293B),
+              onSurface: AppTheme.textPrimary,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      final normalized = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        _selectedDate = normalized;
+        _focusedWeekDate = normalized;
+      });
+    }
+  }
+
   void _pickMealForSlot(BuildContext context, DateTime date, String slotId, String slotName) {
-    // Attempt to map custom slot name to standard category filters
+    // Attempt to map custom slot name to standard category filters (supporting English and Russian)
     final cleanName = slotName.toLowerCase();
     String? categoryFilter;
-    if (cleanName.contains('breakfast')) {
+    if (cleanName.contains('breakfast') || cleanName.contains('завтрак') || cleanName.contains('утрен')) {
       categoryFilter = 'Breakfast';
-    } else if (cleanName.contains('lunch')) {
+    } else if (cleanName.contains('lunch') || cleanName.contains('обед') || cleanName.contains('day')) {
       categoryFilter = 'Lunch';
-    } else if (cleanName.contains('dinner')) {
+    } else if (cleanName.contains('dinner') || cleanName.contains('ужин') || cleanName.contains('вечер') || cleanName.contains('supper')) {
       categoryFilter = 'Dinner';
-    } else if (cleanName.contains('snack')) {
+    } else if (cleanName.contains('snack') || cleanName.contains('перекус') || cleanName.contains('полдник')) {
       categoryFilter = 'Snack';
+    } else {
+      categoryFilter = 'All';
     }
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => MealsLibraryScreen(
-          filterCategory: categoryFilter,
+          initialCategory: categoryFilter,
+          targetSlotId: slotId,
+          targetSlotName: slotName,
           onMealPicked: (mealId) {
             context.read<DietBloc>().add(
                   ScheduleMealToSlot(date: date, slotId: slotId, mealId: mealId),
@@ -252,7 +308,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => MealsLibraryScreen(
-          filterCategory: 'Snack',
+          initialCategory: 'Snack',
+          targetSlotId: slotId,
+          targetSlotName: slotName,
           onMealPicked: (mealId) {
             context.read<DietBloc>().add(
                   AddSnackToSlot(date: date, slotId: slotId, mealId: mealId),
@@ -261,6 +319,181 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _showEnlargedPhotoDialog(BuildContext context, String photoUrl, String mealName) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF334155), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.5),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        mealName,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              // Enlarged Image
+              ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(16),
+                ),
+                child: MealPhotoService.buildMealImage(
+                  photoUrl: photoUrl,
+                  fit: BoxFit.contain,
+                  placeholder: Container(
+                    height: 220,
+                    color: const Color(0xFF0F172A),
+                    child: const Center(
+                      child: CircularProgressIndicator(color: AppTheme.accent),
+                    ),
+                  ),
+                  errorWidget: Container(
+                    height: 220,
+                    color: const Color(0xFF0F172A),
+                    child: const Center(
+                      child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textSecondary),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndUploadSlotPhoto(BuildContext context, DateTime date, String slotId) async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined, color: AppTheme.accent),
+                title: const Text('Take Photo', style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: AppTheme.accent),
+                title: const Text('Choose from Gallery', style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    try {
+      final XFile? photo = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+
+      if (photo == null || !context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Uploading meal photo...'),
+          backgroundColor: Color(0xFF0F172A),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      final uploadedUrl = await MealPhotoService.uploadMealPhoto(
+        image: photo,
+        slotId: slotId,
+      );
+
+      if (!context.mounted) return;
+
+      if (uploadedUrl != null) {
+        context.read<DietBloc>().add(
+              UpdateSlotPhoto(
+                date: date,
+                slotId: slotId,
+                photoUrl: uploadedUrl,
+              ),
+            );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ Photo updated successfully!'),
+            backgroundColor: Color(0xFF10B981),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to upload photo. Please check your connection.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating photo: $e'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
   }
 
   Widget _buildEatenTimeBadge(String slotId, DateTime completedAt) {
@@ -395,62 +628,194 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildWeekDaySelector() {
-    final weekDays = _generateCurrentWeek();
-    return SizedBox(
-      height: 76,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        itemCount: weekDays.length,
-        itemBuilder: (context, index) {
-          final date = weekDays[index];
-          final isSelected = _isSameDate(date, _selectedDate);
-          final weekdayStr = DateFormat('E').format(date); // Mon, Tue...
-          final dayStr = DateFormat('d').format(date); // 26, 27...
+    final weekDays = _generateWeekForDate(_focusedWeekDate);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final isViewingTodayWeek = weekDays.any((d) => _isSameDate(d, today));
+    final isSelectedToday = _isSameDate(_selectedDate, today);
 
-          return GestureDetector(
-            onTap: () {
-              setState(() {
-                _selectedDate = date;
-              });
-            },
-            child: Container(
-              width: 56,
-              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              decoration: BoxDecoration(
-                color: isSelected ? AppTheme.accent.withValues(alpha: 0.1) : AppTheme.cardBg,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isSelected ? AppTheme.accent : const Color(0xFF334155),
-                  width: isSelected ? 1.5 : 1.0,
+    // Formatted header string e.g. "September 2026" or "Sep - Oct 2026" if crossing months
+    final firstDay = weekDays.first;
+    final lastDay = weekDays.last;
+    final String monthHeader = firstDay.month == lastDay.month
+        ? DateFormat('MMMM yyyy').format(firstDay)
+        : '${DateFormat('MMM').format(firstDay)} – ${DateFormat('MMM yyyy').format(lastDay)}';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Navigation Bar: [ < ] [ Month Year (pick) ] [ Today ] [ > ]
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, color: AppTheme.accent, size: 20),
+                tooltip: 'Previous Week',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: _goToPreviousWeek,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _pickCustomDate(context),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            monthHeader,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.calendar_month_outlined, size: 13, color: AppTheme.accent),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    weekdayStr,
-                    style: TextStyle(
-                      color: isSelected ? AppTheme.accent : AppTheme.textSecondary,
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              const SizedBox(width: 4),
+              if (!isSelectedToday || !isViewingTodayWeek) ...[
+                InkWell(
+                  onTap: _goToToday,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppTheme.accent.withValues(alpha: 0.4)),
+                    ),
+                    child: const Text(
+                      'Today',
+                      style: TextStyle(
+                        color: AppTheme.accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    dayStr,
-                    style: TextStyle(
-                      color: isSelected ? AppTheme.accent : AppTheme.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
+                ),
+              ],
+              IconButton(
+                icon: const Icon(Icons.chevron_right, color: AppTheme.accent, size: 20),
+                tooltip: 'Next Week',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: _goToNextWeek,
               ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 7-day strip with horizontal drag/swipe support
+          GestureDetector(
+            onHorizontalDragEnd: (details) {
+              if (details.primaryVelocity != null) {
+                if (details.primaryVelocity! < -200) {
+                  _goToNextWeek();
+                } else if (details.primaryVelocity! > 200) {
+                  _goToPreviousWeek();
+                }
+              }
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: weekDays.map((date) {
+                final isSelected = _isSameDate(date, _selectedDate);
+                final isDayToday = _isSameDate(date, today);
+                final weekdayStr = DateFormat('E').format(date); // Mon, Tue...
+                final dayStr = DateFormat('d').format(date); // 26, 27...
+
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedDate = date;
+                        _focusedWeekDate = date;
+                      });
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppTheme.accent.withValues(alpha: 0.15)
+                            : (isDayToday
+                                ? const Color(0xFF0F172A)
+                                : Colors.transparent),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppTheme.accent
+                              : (isDayToday
+                                  ? AppTheme.accent.withValues(alpha: 0.4)
+                                  : const Color(0xFF334155)),
+                          width: isSelected ? 1.5 : 1.0,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            weekdayStr,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? AppTheme.accent
+                                  : (isDayToday ? AppTheme.accent : AppTheme.textSecondary),
+                              fontSize: 11,
+                              fontWeight: (isSelected || isDayToday) ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            dayStr,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? AppTheme.accent
+                                  : AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (isDayToday && !isSelected) ...[
+                            const SizedBox(height: 2),
+                            Container(
+                              width: 4,
+                              height: 4,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.accent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -464,19 +829,25 @@ class _HomeScreenState extends State<HomeScreen> {
     return DashedContainer(
       color: const Color(0xFF475569), // Slate grey dashed outline
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              slotName,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
+            Flexible(
+              child: Text(
+                slotName,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            const SizedBox(width: 8),
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 OutlinedButton.icon(
                   onPressed: () => FoodLoggingDialog.show(
@@ -490,22 +861,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.accent,
                     side: const BorderSide(color: Color(0xFF334155)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 ElevatedButton.icon(
                   onPressed: () => _pickMealForSlot(context, _selectedDate, slotId, slotName),
                   icon: const Icon(Icons.add, size: 14),
-                  label: Text('Add $slotName', style: const TextStyle(fontSize: 12)),
+                  label: const Text('Add', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.cardBg,
                     foregroundColor: AppTheme.accent,
                     side: const BorderSide(color: Color(0xFF334155)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     elevation: 0,
                   ),
@@ -573,7 +944,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                // Actions: Log Food (AI) & Change
+                // Actions: Log Food (AI), Change, and Remove
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -601,10 +972,33 @@ class _HomeScreenState extends State<HomeScreen> {
                       label: const Text('Change', style: TextStyle(fontSize: 12)),
                       style: TextButton.styleFrom(
                         foregroundColor: AppTheme.textSecondary,
-                        padding: EdgeInsets.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: AppTheme.textSecondary, size: 18),
+                      tooltip: 'Remove Meal',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        context.read<DietBloc>().add(
+                              ScheduleMealToSlot(
+                                date: _selectedDate,
+                                slotId: slotId,
+                                mealId: null,
+                              ),
+                            );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Cleared "$slotName"'),
+                            backgroundColor: const Color(0xFF0F172A),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -686,6 +1080,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final completedAt = dayPlan.slotCompletedAt[slotId];
     final aiBreakdown = dayPlan.slotAiBreakdown[slotId];
 
+    final photoUrl = dayPlan.slotPhotoUrl[slotId];
+
     void openBreakdown() {
       MealNutritionBreakdownDialog.show(
         context,
@@ -701,6 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
         userNote: userNote,
         aiBreakdown: aiBreakdown,
         completedAt: completedAt,
+        photoUrl: photoUrl,
       );
     }
 
@@ -788,6 +1185,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         onSelected: (val) {
                           if (val == 'details') {
                             openBreakdown();
+                          } else if (val == 'photo') {
+                            _pickAndUploadSlotPhoto(context, _selectedDate, slotId);
                           } else if (val == 'relog') {
                             FoodLoggingDialog.show(
                               context,
@@ -803,6 +1202,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     slotId: slotId,
                                   ),
                                 );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Cleared "$slotName"'),
+                                backgroundColor: const Color(0xFF0F172A),
+                              ),
+                            );
                           }
                         },
                         itemBuilder: (ctx) => [
@@ -813,6 +1218,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Icon(Icons.analytics_outlined, color: Color(0xFF10B981), size: 16),
                                 SizedBox(width: 8),
                                 Text('View Breakdown', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'photo',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  photoUrl != null ? Icons.photo_camera_outlined : Icons.add_a_photo_outlined,
+                                  color: AppTheme.accent,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  photoUrl != null ? 'Change Photo' : 'Attach Photo',
+                                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                                ),
                               ],
                             ),
                           ),
@@ -830,9 +1252,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             value: 'reset',
                             child: Row(
                               children: [
-                                Icon(Icons.restart_alt, color: AppTheme.error, size: 16),
+                                Icon(Icons.delete_outline, color: AppTheme.error, size: 16),
                                 SizedBox(width: 8),
-                                Text('Reset to Plan', style: TextStyle(color: AppTheme.error, fontSize: 13)),
+                                Text('Clear Slot', style: TextStyle(color: AppTheme.error, fontSize: 13)),
                               ],
                             ),
                           ),
@@ -844,26 +1266,68 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 10),
 
-              // Actual Meal Name
-              Text(
-                actualName,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              if (plannedMeal != null && plannedMeal.name != actualName) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'Planned: ${plannedMeal.name}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                    fontStyle: FontStyle.italic,
+              // Actual Meal Name & Photo Thumbnail
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          actualName,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        if (plannedMeal != null && plannedMeal.name != actualName) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Planned: ${plannedMeal.name}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  if (photoUrl != null && photoUrl.isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () => _showEnlargedPhotoDialog(context, photoUrl, actualName),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 54,
+                          height: 54,
+                          color: const Color(0xFF0F172A),
+                          child: MealPhotoService.buildMealImage(
+                            photoUrl: photoUrl,
+                            width: 54,
+                            height: 54,
+                            fit: BoxFit.cover,
+                            errorWidget: const Center(
+                              child: Icon(Icons.broken_image_outlined, size: 20, color: AppTheme.textSecondary),
+                            ),
+                            placeholder: const Center(
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               const SizedBox(height: 12),
 
               // Macro summary chips row
@@ -1131,17 +1595,229 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDailyMacroSummary(DayPlan dayPlan) {
+  void _showEditDailyCalorieTargetDialog(BuildContext context, double currentTarget) {
+    final controller = TextEditingController(text: currentTarget.round().toString());
+    final presets = [1600, 1800, 2000, 2200, 2500, 3000];
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 380),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF334155), width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.accent.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.track_changes, color: AppTheme.accent, size: 18),
+                              ),
+                              const SizedBox(width: 10),
+                              const Flexible(
+                                child: Text(
+                                  'Daily Calorie Target',
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(ctx),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Set your daily energy budget for diet planning and tracking.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      autofocus: true,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Daily Goal (kcal)',
+                        labelStyle: const TextStyle(color: AppTheme.accent),
+                        suffixText: 'kcal',
+                        suffixStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                        filled: true,
+                        fillColor: const Color(0xFF0F172A),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF334155)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF334155)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppTheme.accent),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Quick Presets:',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: presets.map((p) {
+                        final isSelected = controller.text == p.toString();
+                        return InkWell(
+                          onTap: () {
+                            controller.text = p.toString();
+                            setDialogState(() {});
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isSelected
+                                    ? AppTheme.accent
+                                    : const Color(0xFF334155),
+                              ),
+                            ),
+                            child: Text(
+                              '$p kcal',
+                              style: TextStyle(
+                                color: isSelected
+                                    ? AppTheme.accent
+                                    : AppTheme.textSecondary,
+                                fontSize: 12,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.textSecondary,
+                              side: const BorderSide(color: Color(0xFF334155)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              final parsed = double.tryParse(controller.text.trim());
+                              if (parsed != null && parsed > 0) {
+                                context.read<DietBloc>().add(SetDailyCalorieTarget(parsed));
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('✓ Daily target set to ${parsed.round()} kcal'),
+                                    backgroundColor: const Color(0xFF10B981),
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.accent,
+                              foregroundColor: AppTheme.background,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text(
+                              'Save Target',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDailyMacroSummary(DayPlan dayPlan, double dailyTarget) {
     double totalCalories = 0.0;
     double totalProtein = 0.0;
     double totalFats = 0.0;
     double totalCarbs = 0.0;
     double totalFiber = 0.0;
-    int loggedMealsCount = 0;
 
     dayPlan.slotIsActual.forEach((slotId, isActual) {
       if (isActual) {
-        loggedMealsCount++;
         totalCalories += dayPlan.slotCalories[slotId] ?? 0.0;
         totalProtein += dayPlan.slotProtein[slotId] ?? 0.0;
         totalFats += dayPlan.slotFats[slotId] ?? 0.0;
@@ -1150,49 +1826,155 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    if (loggedMealsCount == 0) {
-      return const SizedBox.shrink();
-    }
+    final target = dailyTarget > 0 ? dailyTarget : 2000.0;
+    final isOver = totalCalories > target;
+    final diff = (target - totalCalories).abs();
+    final progress = (totalCalories / target).clamp(0.0, 1.0);
+    final progressColor = isOver ? const Color(0xFFEF4444) : const Color(0xFF10B981);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: const Color(0xFF1E293B),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFF334155)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Top Row: Daily Goal Title & Target Chip
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.pie_chart_outline, size: 16, color: AppTheme.accent),
-                  SizedBox(width: 6),
-                  Text(
-                    'Daily Actual Nutrition',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
+              const Flexible(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.track_changes, size: 15, color: AppTheme.accent),
+                    SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        'Daily Goal',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: InkWell(
+                  onTap: () => _showEditDailyCalorieTargetDialog(context, target),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Target: ${target.round()} kcal',
+                            style: const TextStyle(
+                              color: AppTheme.accent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        const Icon(Icons.edit_outlined, size: 11, color: AppTheme.accent),
+                      ],
                     ),
                   ),
-                ],
-              ),
-              Text(
-                '$loggedMealsCount logged',
-                style: const TextStyle(
-                  color: Color(0xFF10B981),
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
+
+          // Middle Row: Calories "900 / 2000 kcal" & Remaining status
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: InkWell(
+                  onTap: () => _showEditDailyCalorieTargetDialog(context, target),
+                  borderRadius: BorderRadius.circular(4),
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '${totalCalories.round()}',
+                          style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        TextSpan(
+                          text: ' / ${target.round()} kcal',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  isOver
+                      ? '${diff.round()} kcal over'
+                      : '${diff.round()} kcal remaining',
+                  style: TextStyle(
+                    color: isOver ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Progress Bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: const Color(0xFF334155),
+              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+              minHeight: 7,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Macro Row
           Row(
             children: [
               Expanded(child: _buildMacroChip('${totalCalories.toStringAsFixed(0)} kcal', 'Calories', const Color(0xFFF59E0B))),
@@ -1209,13 +1991,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMacroChip(String value, String label, Color color) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
           ),
         ),
         const SizedBox(height: 2),
@@ -1225,6 +2011,8 @@ class _HomeScreenState extends State<HomeScreen> {
             color: AppTheme.textSecondary,
             fontSize: 10,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -1243,14 +2031,14 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (context, state) => _buildLastMealBanner(state),
         ),
 
-        // Daily Actual Nutrition Macro Summary
+        // Daily Actual Nutrition Macro Summary & Calorie Target Progress
         BlocBuilder<DietBloc, DietState>(
           builder: (context, state) {
             final dayPlan = state.dayPlans.firstWhere(
               (p) => _isSameDate(p.date, _selectedDate),
               orElse: () => DayPlan(date: _selectedDate, slotMeals: const {}),
             );
-            return _buildDailyMacroSummary(dayPlan);
+            return _buildDailyMacroSummary(dayPlan, state.dailyCalorieTarget);
           },
         ),
         const SizedBox(height: 4),
@@ -1367,7 +2155,10 @@ class _HomeScreenState extends State<HomeScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        final userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'Unknown User';
+        String userEmail = 'PlateMate User';
+        try {
+          userEmail = Supabase.instance.client.auth.currentUser?.email ?? 'PlateMate User';
+        } catch (_) {}
         return Dialog(
           backgroundColor: AppTheme.cardBg,
           shape: RoundedRectangleBorder(
@@ -1436,6 +2227,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Daily Calorie Target Option
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.track_changes, color: AppTheme.accent),
+                  title: const Text('Daily Calorie Target', style: TextStyle(color: AppTheme.textPrimary)),
+                  subtitle: BlocBuilder<DietBloc, DietState>(
+                    builder: (context, state) => Text(
+                      '${state.dailyCalorieTarget.round()} kcal',
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+                  onTap: () {
+                    final currentTarget = context.read<DietBloc>().state.dailyCalorieTarget;
+                    _showEditDailyCalorieTargetDialog(context, currentTarget);
+                  },
+                ),
+                const Divider(color: Color(0xFF334155)),
                 // Manage Slots Option
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1453,12 +2262,30 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
                 const Divider(color: Color(0xFF334155)),
+                // Export HTML Nutrition Report Option
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.summarize_outlined, color: AppTheme.accent),
+                  title: const Text('Export Nutrition Report', style: TextStyle(color: AppTheme.textPrimary)),
+                  subtitle: const Text(
+                    'Generate & share responsive HTML diet report',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+                  onTap: () {
+                    Navigator.pop(context); // Close settings dialog
+                    _showExportReportDialog(context);
+                  },
+                ),
+                const Divider(color: Color(0xFF334155)),
                 const SizedBox(height: 16),
                 // Sign Out Button
                 ElevatedButton(
                   onPressed: () async {
                     Navigator.pop(context); // Close dialog
-                    await Supabase.instance.client.auth.signOut();
+                    try {
+                      await Supabase.instance.client.auth.signOut();
+                    } catch (_) {}
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.error,
@@ -1478,6 +2305,311 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showExportReportDialog(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    DateTime startDate = today.subtract(const Duration(days: 6));
+    DateTime endDate = today;
+    String selectedPreset = 'Last 7 Days';
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final formattedRange =
+                '${DateFormat('MMM d, yyyy').format(startDate)} – ${DateFormat('MMM d, yyyy').format(endDate)}';
+            final totalDays = endDate.difference(startDate).inDays + 1;
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF334155), width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.accent.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.summarize_outlined, color: AppTheme.accent, size: 20),
+                              ),
+                              const SizedBox(width: 10),
+                              const Flexible(
+                                child: Text(
+                                  'Export HTML Report',
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+                          onPressed: () => Navigator.pop(ctx),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Generate a self-contained responsive HTML report of your nutrition, meal logs, and macro summaries.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Select Date Range:',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildRangePresetChip(
+                          label: 'Last 7 Days',
+                          isSelected: selectedPreset == 'Last 7 Days',
+                          onTap: () {
+                            setDialogState(() {
+                              selectedPreset = 'Last 7 Days';
+                              startDate = today.subtract(const Duration(days: 6));
+                              endDate = today;
+                            });
+                          },
+                        ),
+                        _buildRangePresetChip(
+                          label: 'Last 14 Days',
+                          isSelected: selectedPreset == 'Last 14 Days',
+                          onTap: () {
+                            setDialogState(() {
+                              selectedPreset = 'Last 14 Days';
+                              startDate = today.subtract(const Duration(days: 13));
+                              endDate = today;
+                            });
+                          },
+                        ),
+                        _buildRangePresetChip(
+                          label: 'Last 30 Days',
+                          isSelected: selectedPreset == 'Last 30 Days',
+                          onTap: () {
+                            setDialogState(() {
+                              selectedPreset = 'Last 30 Days';
+                              startDate = today.subtract(const Duration(days: 29));
+                              endDate = today;
+                            });
+                          },
+                        ),
+                        _buildRangePresetChip(
+                          label: 'Current Month',
+                          isSelected: selectedPreset == 'Current Month',
+                          onTap: () {
+                            setDialogState(() {
+                              selectedPreset = 'Current Month';
+                              startDate = DateTime(today.year, today.month, 1);
+                              final nextMonth = DateTime(today.year, today.month + 1, 1);
+                              endDate = nextMonth.subtract(const Duration(days: 1));
+                            });
+                          },
+                        ),
+                        _buildRangePresetChip(
+                          label: 'Custom...',
+                          isSelected: selectedPreset == 'Custom',
+                          onTap: () async {
+                            final picked = await showDateRangePicker(
+                              context: context,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2035),
+                              initialDateRange: DateTimeRange(start: startDate, end: endDate),
+                              builder: (context, child) {
+                                return Theme(
+                                  data: AppTheme.darkTheme.copyWith(
+                                    colorScheme: const ColorScheme.dark(
+                                      primary: AppTheme.accent,
+                                      onPrimary: AppTheme.background,
+                                      surface: Color(0xFF1E293B),
+                                      onSurface: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  child: child!,
+                                );
+                              },
+                            );
+                            if (picked != null) {
+                              setDialogState(() {
+                                selectedPreset = 'Custom';
+                                startDate = DateTime(picked.start.year, picked.start.month, picked.start.day);
+                                endDate = DateTime(picked.end.year, picked.end.month, picked.end.day);
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    // Selected Range Info Card
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.date_range, color: AppTheme.accent, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  formattedRange,
+                                  style: const TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  '$totalDays ${totalDays == 1 ? "day" : "days"} included in report',
+                                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Actions
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.textSecondary,
+                              side: const BorderSide(color: Color(0xFF334155)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final state = context.read<DietBloc>().state;
+                              String? userEmail;
+                              try {
+                                userEmail = Supabase.instance.client.auth.currentUser?.email;
+                              } catch (_) {}
+                              Navigator.pop(ctx);
+                              await ReportExportService.exportAndShareReport(
+                                context: context,
+                                state: state,
+                                startDate: startDate,
+                                endDate: endDate,
+                                userEmail: userEmail,
+                              );
+                            },
+                            icon: const Icon(Icons.share, size: 16),
+                            label: const Text(
+                              'Share Report',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.accent,
+                              foregroundColor: AppTheme.background,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRangePresetChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.accent.withValues(alpha: 0.15) : const Color(0xFF0F172A),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? AppTheme.accent : const Color(0xFF334155),
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? AppTheme.accent : AppTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
     );
   }
 

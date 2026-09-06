@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../blocs/diet_bloc.dart';
 import '../../core/theme.dart';
 import '../../services/food_analysis_service.dart';
+import '../../services/meal_photo_service.dart';
 
 class FoodLoggingDialog extends StatefulWidget {
   final DateTime date;
@@ -65,6 +66,10 @@ class _FoodLoggingDialogState extends State<FoodLoggingDialog> {
   bool _isAnalyzing = false;
   FoodAnalysisResult? _analysisResult;
 
+  bool _isAddingIngredient = false;
+  final TextEditingController _addNameController = TextEditingController();
+  final TextEditingController _addWeightController = TextEditingController(text: '100');
+
   @override
   void dispose() {
     _noteController.dispose();
@@ -74,7 +79,125 @@ class _FoodLoggingDialogState extends State<FoodLoggingDialog> {
     _fatsController.dispose();
     _carbsController.dispose();
     _fiberController.dispose();
+    _addNameController.dispose();
+    _addWeightController.dispose();
     super.dispose();
+  }
+
+  void _addIngredient() {
+    final name = _addNameController.text.trim();
+    if (name.isEmpty) return;
+
+    final grams = double.tryParse(_addWeightController.text.trim()) ?? 100.0;
+
+    final parsed = LocalFoodParser.parse(
+      mealName: name,
+      ingredients: ['$name ${grams.round()}g'],
+    );
+
+    final FoodAnalysisItem newItem;
+    if (parsed.items.isNotEmpty) {
+      newItem = parsed.items.first;
+    } else {
+      final mult = grams / 100.0;
+      newItem = FoodAnalysisItem(
+        name: name,
+        weight: '${grams.round()}g',
+        calories: (120.0 * mult).roundToDouble(),
+        protein: double.parse((5.0 * mult).toStringAsFixed(1)),
+        fats: double.parse((3.0 * mult).toStringAsFixed(1)),
+        carbs: double.parse((15.0 * mult).toStringAsFixed(1)),
+      );
+    }
+
+    final itemCal = newItem.calories ?? 0.0;
+    final itemP = newItem.protein ?? 0.0;
+    final itemF = newItem.fats ?? 0.0;
+    final itemC = newItem.carbs ?? 0.0;
+    final itemFiber = (parsed.fiber > 0) ? parsed.fiber : 0.0;
+
+    final currentItems = List<FoodAnalysisItem>.from(_analysisResult?.items ?? []);
+    currentItems.add(newItem);
+
+    final curCal = (double.tryParse(_caloriesController.text.trim()) ?? _analysisResult?.calories ?? 0.0) + itemCal;
+    final curP = (double.tryParse(_proteinController.text.trim()) ?? _analysisResult?.protein ?? 0.0) + itemP;
+    final curF = (double.tryParse(_fatsController.text.trim()) ?? _analysisResult?.fats ?? 0.0) + itemF;
+    final curC = (double.tryParse(_carbsController.text.trim()) ?? _analysisResult?.carbs ?? 0.0) + itemC;
+    final curFiber = (double.tryParse(_fiberController.text.trim()) ?? _analysisResult?.fiber ?? 0.0) + itemFiber;
+
+    setState(() {
+      _caloriesController.text = curCal.toStringAsFixed(0);
+      _proteinController.text = curP.toStringAsFixed(1);
+      _fatsController.text = curF.toStringAsFixed(1);
+      _carbsController.text = curC.toStringAsFixed(1);
+      _fiberController.text = curFiber.toStringAsFixed(1);
+
+      _analysisResult = FoodAnalysisResult(
+        mealName: _mealNameController.text.trim().isNotEmpty
+            ? _mealNameController.text.trim()
+            : (_analysisResult?.mealName ?? 'Logged Meal'),
+        calories: curCal,
+        protein: curP,
+        fats: curF,
+        carbs: curC,
+        fiber: curFiber,
+        items: currentItems,
+        cleanedDescription: _analysisResult?.cleanedDescription,
+        rawResponse: _analysisResult?.rawResponse,
+      );
+      _isAddingIngredient = false;
+      _addNameController.clear();
+      _addWeightController.text = '100';
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✓ Added "${newItem.name}" (+${itemCal.round()} kcal)'),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _removeIngredient(int index) {
+    if (_analysisResult == null) return;
+    final currentItems = List<FoodAnalysisItem>.from(_analysisResult!.items);
+    if (index >= 0 && index < currentItems.length) {
+      final removed = currentItems.removeAt(index);
+      final itemCal = removed.calories ?? 0.0;
+      final itemP = removed.protein ?? 0.0;
+      final itemF = removed.fats ?? 0.0;
+      final itemC = removed.carbs ?? 0.0;
+      final itemFiber = 0.0;
+
+      final curCal = ((double.tryParse(_caloriesController.text.trim()) ?? _analysisResult!.calories) - itemCal).clamp(0.0, double.infinity);
+      final curP = ((double.tryParse(_proteinController.text.trim()) ?? _analysisResult!.protein) - itemP).clamp(0.0, double.infinity);
+      final curF = ((double.tryParse(_fatsController.text.trim()) ?? _analysisResult!.fats) - itemF).clamp(0.0, double.infinity);
+      final curC = ((double.tryParse(_carbsController.text.trim()) ?? _analysisResult!.carbs) - itemC).clamp(0.0, double.infinity);
+      final curFiber = ((double.tryParse(_fiberController.text.trim()) ?? _analysisResult!.fiber) - itemFiber).clamp(0.0, double.infinity);
+
+      setState(() {
+        _caloriesController.text = curCal.toStringAsFixed(0);
+        _proteinController.text = curP.toStringAsFixed(1);
+        _fatsController.text = curF.toStringAsFixed(1);
+        _carbsController.text = curC.toStringAsFixed(1);
+        _fiberController.text = curFiber.toStringAsFixed(1);
+
+        _analysisResult = FoodAnalysisResult(
+          mealName: _mealNameController.text.trim().isNotEmpty
+              ? _mealNameController.text.trim()
+              : _analysisResult!.mealName,
+          calories: curCal,
+          protein: curP,
+          fats: curF,
+          carbs: curC,
+          fiber: curFiber,
+          items: currentItems,
+          cleanedDescription: _analysisResult?.cleanedDescription,
+          rawResponse: _analysisResult?.rawResponse,
+        );
+      });
+    }
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -196,21 +319,43 @@ class _FoodLoggingDialogState extends State<FoodLoggingDialog> {
     final carbs = double.tryParse(_carbsController.text.trim()) ?? _analysisResult?.carbs ?? 0.0;
     final fiber = double.tryParse(_fiberController.text.trim()) ?? _analysisResult?.fiber ?? 0.0;
 
-    context.read<DietBloc>().add(
-          LogActualMeal(
-            date: widget.date,
-            slotId: widget.slotId,
-            actualMealName: mealName,
-            calories: calories,
-            protein: protein,
-            fats: fats,
-            carbs: carbs,
-            fiber: fiber,
-            userNote: _noteController.text.trim().isNotEmpty ? _noteController.text.trim() : null,
-            aiBreakdown: _analysisResult?.items.map((i) => i.toMap()).toList(),
-            completedAt: DateTime.now(),
-          ),
-        );
+    final imageToUpload = _selectedImages.isNotEmpty ? _selectedImages.first : null;
+    final bloc = context.read<DietBloc>();
+
+    bloc.add(
+      LogActualMeal(
+        date: widget.date,
+        slotId: widget.slotId,
+        actualMealName: mealName,
+        calories: calories,
+        protein: protein,
+        fats: fats,
+        carbs: carbs,
+        fiber: fiber,
+        userNote: _noteController.text.trim().isNotEmpty ? _noteController.text.trim() : null,
+        aiBreakdown: _analysisResult?.items.map((i) => i.toMap()).toList(),
+        completedAt: DateTime.now(),
+      ),
+    );
+
+    if (imageToUpload != null) {
+      MealPhotoService.uploadMealPhoto(
+        image: imageToUpload,
+        slotId: widget.slotId,
+      ).then((uploadedUrl) {
+        if (uploadedUrl != null) {
+          bloc.add(
+            UpdateSlotPhoto(
+              date: widget.date,
+              slotId: widget.slotId,
+              photoUrl: uploadedUrl,
+            ),
+          );
+        }
+      }).catchError((e) {
+        debugPrint('[FoodLoggingDialog] Photo upload background error: $e');
+      });
+    }
 
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -633,37 +778,40 @@ class _FoodLoggingDialogState extends State<FoodLoggingDialog> {
         ),
         const SizedBox(height: 14),
 
-        // Recognized Ingredients / Items Breakdown
-        if (_analysisResult != null && _analysisResult!.items.isNotEmpty)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF334155)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Detected Food Items',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
+        // Recognized Ingredients / Items Breakdown & Add Ingredient
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Detected Food Items',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
                     ),
-                    Text(
-                      '${_analysisResult!.items.length} items',
-                      style: const TextStyle(color: AppTheme.accent, fontSize: 12),
-                    ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    '${_analysisResult?.items.length ?? 0} items',
+                    style: const TextStyle(color: AppTheme.accent, fontSize: 12),
+                  ),
+                ],
+              ),
+              if (_analysisResult != null && _analysisResult!.items.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                ..._analysisResult!.items.map((item) {
+                ..._analysisResult!.items.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final item = entry.value;
+
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Row(
@@ -675,32 +823,216 @@ class _FoodLoggingDialogState extends State<FoodLoggingDialog> {
                             style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                           ),
                         ),
-                        if (item.weight != null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(6),
+                        const SizedBox(width: 6),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (item.weight != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0F172A),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  item.weight!,
+                                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                ),
+                              ),
+                            if (item.calories != null) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '${item.calories!.toStringAsFixed(0)} kcal',
+                                style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () => _removeIngredient(idx),
+                              child: const Padding(
+                                padding: EdgeInsets.all(2),
+                                child: Icon(Icons.close, size: 14, color: Color(0xFF64748B)),
+                              ),
                             ),
-                            child: Text(
-                              item.weight!,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                            ),
-                          ),
-                        if (item.calories != null) ...[
-                          const SizedBox(width: 6),
-                          Text(
-                            '${item.calories!.toStringAsFixed(0)} kcal',
-                            style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                          ],
+                        ),
                       ],
                     ),
                   );
                 }),
               ],
-            ),
+              const SizedBox(height: 10),
+
+              // Inline Add Ingredient Form or Button
+              if (_isAddingIngredient)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Row(
+                              children: [
+                                Icon(Icons.add_circle_outline, size: 15, color: AppTheme.accent),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Add Missing Ingredient',
+                                  style: TextStyle(
+                                    color: AppTheme.accent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _isAddingIngredient = false;
+                              });
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.close, size: 16, color: AppTheme.textSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: _addNameController,
+                              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                labelText: 'Ingredient',
+                                hintText: 'e.g., Canned Tuna',
+                                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                                filled: true,
+                                fillColor: const Color(0xFF1E293B),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: AppTheme.accent),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _addWeightController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                labelText: 'Weight',
+                                suffixText: 'g',
+                                filled: true,
+                                fillColor: const Color(0xFF1E293B),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(color: AppTheme.accent),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _isAddingIngredient = false;
+                              });
+                            },
+                            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            onPressed: _addIngredient,
+                            icon: const Icon(Icons.add, size: 14),
+                            label: const Text('Add Item', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.accent,
+                              foregroundColor: AppTheme.background,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+              else
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _isAddingIngredient = true;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accent.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add, size: 16, color: AppTheme.accent),
+                        SizedBox(width: 6),
+                        Text(
+                          '+ Add Ingredient',
+                          style: TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
+        ),
         const SizedBox(height: 20),
 
         // Bottom Action Buttons

@@ -13,6 +13,7 @@ class DayPlan {
   final Map<String, double?> slotFiber; // slotId -> fiber
   final Map<String, String?> slotUserNote; // slotId -> userNote
   final Map<String, dynamic> slotAiBreakdown; // slotId -> aiBreakdown
+  final Map<String, String?> slotPhotoUrl; // slotId -> photoUrl
 
   DayPlan({
     required this.date,
@@ -29,6 +30,7 @@ class DayPlan {
     this.slotFiber = const {},
     this.slotUserNote = const {},
     this.slotAiBreakdown = const {},
+    this.slotPhotoUrl = const {},
   });
 
   DayPlan copyWith({
@@ -46,6 +48,7 @@ class DayPlan {
     Map<String, double?>? slotFiber,
     Map<String, String?>? slotUserNote,
     Map<String, dynamic>? slotAiBreakdown,
+    Map<String, String?>? slotPhotoUrl,
   }) {
     return DayPlan(
       date: date ?? this.date,
@@ -62,6 +65,7 @@ class DayPlan {
       slotFiber: slotFiber ?? this.slotFiber,
       slotUserNote: slotUserNote ?? this.slotUserNote,
       slotAiBreakdown: slotAiBreakdown ?? this.slotAiBreakdown,
+      slotPhotoUrl: slotPhotoUrl ?? this.slotPhotoUrl,
     );
   }
 
@@ -86,6 +90,7 @@ class DayPlan {
       'slotFiber': slotFiber,
       'slotUserNote': slotUserNote,
       'slotAiBreakdown': slotAiBreakdown,
+      'slotPhotoUrl': slotPhotoUrl,
     };
   }
 
@@ -204,6 +209,14 @@ class DayPlan {
       });
     }
 
+    final Map<String, String?> slotPhotoUrl = {};
+    if (map['slotPhotoUrl'] != null) {
+      final raw = map['slotPhotoUrl'] as Map<String, dynamic>;
+      raw.forEach((key, value) {
+        slotPhotoUrl[key] = value as String?;
+      });
+    }
+
     return DayPlan(
       date: date,
       slotMeals: slotMeals,
@@ -219,6 +232,7 @@ class DayPlan {
       slotFiber: slotFiber,
       slotUserNote: slotUserNote,
       slotAiBreakdown: slotAiBreakdown,
+      slotPhotoUrl: slotPhotoUrl,
     );
   }
 
